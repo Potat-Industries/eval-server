@@ -1,4 +1,4 @@
-import IsolatedVM, { Context } from "isolated-vm";
+import IsolatedVM from "isolated-vm";
 
 export class Utils {
   static instance: Utils;
