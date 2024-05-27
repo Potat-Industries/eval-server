@@ -62,7 +62,9 @@ new class EvalServer {
   }
 
   private async add(code: string, msg: any): Promise<any> {
+
     return new Promise((resolve, reject) => {
+      if (this.queue.length > 20) reject('Queue is full');
       this.queue.push({ code, msg, resolve, reject } as Waiter);
       this.process();
     });
@@ -94,12 +96,38 @@ new class EvalServer {
 
         await jail.set('global', jail.derefInto());
 
-        //if (msg) await jail.set('msg', new Reference(msg, { unsafeInherit: true }));
+        /** @todo handle trimming of excess message data on application side */
+        delete msg.channel.data.command_stats;
+        delete msg.channel.commands;
+        delete msg.command.description;
+        delete msg.channel.blocks;
+
+        await context.evalClosure(`
+          stringify = function(value) {
+            return $0.apply(undefined, [value], { result: { promise: false } })
+          }`,
+          [],
+          { arguments: { reference: true } }
+        );
+
+        const prelude = `
+          'use strict'; 
+
+          function toString(value) {
+            if (typeof value === 'string') return value;
+            if (value instanceof Error) return value.constructor.name + ': ' + value.message;
+            if (value instanceof Promise) return value.then(toString);
+            if (Array.isArray(value)) return value.map(toString).join(', ');
+            return JSON.stringify(value);
+          } 
+
+          let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg))});
+        `;
 
         await Utils.inject(jail);
 
         if (/return|await/.test(code)) {
-          code = `'use strict'; (async function evaluate() { ${code} })();`;
+          code = prelude + `toString((async function evaluate() { ${code} })());`;
 
           await context.evalClosure(`
             evaluate = function() {
@@ -108,6 +136,8 @@ new class EvalServer {
             [],
             { arguments: { reference: true } }
           );
+        } else {
+          code = prelude + `toString(eval('${code.replace(/[\\"']/g, '\\$&')}'))`;
         }
 
         return context.eval(code, { timeout: 2000, promise: true });
