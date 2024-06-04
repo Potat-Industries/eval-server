@@ -1,7 +1,13 @@
-import express, { Request, Response, Application, NextFunction, json } from 'express';
-import { Isolate, Reference } from 'isolated-vm';
-import { inspect } from 'node:util';
-import { Utils } from './sandbox-utils.js';
+import express, {
+  Request,
+  Response,
+  Application,
+  NextFunction,
+  json,
+} from "express";
+import { ExternalCopy, Isolate, Reference } from "isolated-vm";
+import { inspect } from "node:util";
+import { Utils } from "./sandbox-utils.js";
 
 interface Config {
   port: number;
@@ -22,7 +28,7 @@ interface EvalResponse {
   errors?: { message: string }[];
 }
 
-new class EvalServer {
+new (class EvalServer {
   private server: Application;
   private config: Config;
   private queue: Waiter[] = [];
@@ -37,34 +43,33 @@ new class EvalServer {
 
   private setupRoute() {
     this.server.post(
-      '/eval',
+      "/eval",
       this.authenticate.bind(this),
-    async (req: Request, res: Response
-  ) => {
-    const start = performance.now();
-    const result = await this
-      .add(req.body.code, req.body.msg)
-      .catch(() => res.status(500).send({
-        data: [],
-        statusCode: 500,
-        duration: parseFloat((performance.now() - start).toFixed(4)),
-        errors: [{ message: 'Internal server error' }]
-      })) as EvalResponse;
+      async (req: Request, res: Response) => {
+        const start = performance.now();
+        const result = (await this.add(req.body.code, req.body.msg).catch(() =>
+          res.status(500).send({
+            data: [],
+            statusCode: 500,
+            duration: parseFloat((performance.now() - start).toFixed(4)),
+            errors: [{ message: "Internal server error" }],
+          })
+        )) as EvalResponse;
 
-      return res.status(200).send({
-        data: [String(result)],
-        statusCode: 200,
-        duration: parseFloat((performance.now() - start).toFixed(4))
-      } as EvalResponse);
-    });
+        return res.status(200).send({
+          data: [String(result)],
+          statusCode: 200,
+          duration: parseFloat((performance.now() - start).toFixed(4)),
+        } as EvalResponse);
+      }
+    );
 
     this.startServer();
   }
 
   private async add(code: string, msg: any): Promise<any> {
-
     return new Promise((resolve, reject) => {
-      if (this.queue.length > 20) reject('Queue is full');
+      if (this.queue.length > 20) reject("Queue is full");
       this.queue.push({ code, msg, resolve, reject } as Waiter);
       this.process();
     });
@@ -94,21 +99,13 @@ new class EvalServer {
       .then(async (context) => {
         const jail = context.global;
 
-        await jail.set('global', jail.derefInto());
+        await jail.set("global", jail.derefInto());
 
         /** @todo handle trimming of excess message data on application side */
         delete msg.channel.data.command_stats;
         delete msg.channel.commands;
         delete msg.command.description;
         delete msg.channel.blocks;
-
-        await context.evalClosure(`
-          stringify = function(value) {
-            return $0.apply(undefined, [value], { result: { promise: false } })
-          }`,
-          [],
-          { arguments: { reference: true } }
-        );
 
         const prelude = `
           'use strict'; 
@@ -124,12 +121,29 @@ new class EvalServer {
           let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg))});
         `;
 
+        await context.evalClosure(`
+          global.fetch = (url, options) => $0.apply(undefined, [url, options], { 
+              arguments: { copy: true }, 
+              promise: true, 
+              result: { copy: true, promise: true } 
+            })
+          `,
+          [
+            new Reference(async function (url: string, options: any) {
+              const result = await fetch(url, options);
+              const data = await result.clone().json().catch(() => result.clone().text());
+              return new ExternalCopy(data).copyInto();
+            })
+          ]
+        );
+
         await Utils.inject(jail);
 
         if (/return|await/.test(code)) {
           code = prelude + `toString((async function evaluate() { ${code} })());`;
 
-          await context.evalClosure(`
+          await context.evalClosure(
+            `
             evaluate = function() {
               return $0.apply(undefined, [], { result: { promise: true } })
             }`,
@@ -137,19 +151,19 @@ new class EvalServer {
             { arguments: { reference: true } }
           );
         } else {
-          code = prelude + `toString(eval('${code.replace(/[\\"']/g, '\\$&')}'))`;
+          code = prelude + `toString(eval('${code.replace(/[\\"']/g, "\\$&")}'))`;
         }
 
-        return context.eval(code, { timeout: 2000, promise: true });
+        return context.eval(code, { timeout: 5000, promise: true });
       })
-      .catch((e) => {return '🚫 ' + e.constructor.name + ': ' + e.message})
+      .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
       .finally(() => isolate.dispose());
 
     return this.stringify(result);
   }
 
   private stringify(result: any): string {
-    if (typeof result === 'string') return result;
+    if (typeof result === "string") return result;
 
     if (result instanceof Error) {
       return result.message;
@@ -159,13 +173,13 @@ new class EvalServer {
   }
 
   private authenticate(req: Request, res: Response, next: NextFunction) {
-    const auth = req.headers.authorization?.replace(/^Bearer /, '');
+    const auth = req.headers.authorization?.replace(/^Bearer /, "");
     if (auth !== this.config.auth) {
       return res.status(418).send({
         data: [],
         statusCode: 418,
         duration: 0,
-        errors: [{ message: 'not today my little bish xqcL' }]
+        errors: [{ message: "not today my little bish xqcL" }],
       } as EvalResponse);
     }
 
@@ -177,4 +191,4 @@ new class EvalServer {
       console.log(`Server listening on port ${this.config.port}`);
     });
   }
-}(require('./config.json'));
+})(require("./config.json"));
