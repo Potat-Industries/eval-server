@@ -130,9 +130,28 @@ new (class EvalServer {
           `,
           [
             new Reference(async function (url: string, options: any) {
-              const result = await fetch(url, options);
-              const data = await result.clone().json().catch(() => result.clone().text());
-              return new ExternalCopy({ body: data, status: result.status }).copyInto();
+              const timeout = () => {
+                const controller = new AbortController();
+                setTimeout(() => controller.abort(), 5000);
+                return controller.signal;
+              }
+
+              try {
+                const response = await fetch(url, {
+                  ...options ?? {},
+                  signal: timeout(),
+                  headers: {
+                    ...options?.headers ?? {},
+                    'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/'
+                  }
+                })
+
+                const data = await response.clone().json().catch(() => response.clone().text());
+                return new ExternalCopy({ body: data, status: response.status }).copyInto();
+
+              } catch (e) {
+                return new ExternalCopy(e).copyInto();
+              }
             })
           ]
         );
