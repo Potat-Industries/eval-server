@@ -6,7 +6,7 @@ import express, {
   json,
 } from "express";
 import { ExternalCopy, Isolate, Reference } from "isolated-vm";
-import { inspect } from "node:util";
+import { timingSafeEqual } from "crypto";
 import { Utils } from "./sandbox-utils.js";
 
 interface Config {
@@ -102,10 +102,10 @@ new (class EvalServer {
         await jail.set("global", jail.derefInto());
 
         /** @todo handle trimming of excess message data on application side */
-        delete msg.channel.data.command_stats;
-        delete msg.channel.commands;
-        delete msg.command.description;
-        delete msg.channel.blocks;
+        delete msg?.channel?.data?.command_stats;
+        delete msg?.channel?.commands;
+        delete msg?.command?.description;
+        delete msg?.channel?.blocks;
 
         const prelude = `
           'use strict'; 
@@ -132,7 +132,7 @@ new (class EvalServer {
             new Reference(async function (url: string, options: any) {
               const result = await fetch(url, options);
               const data = await result.clone().json().catch(() => result.clone().text());
-              return new ExternalCopy(data).copyInto();
+              return new ExternalCopy({ body: data, status: result.status }).copyInto();
             })
           ]
         );
@@ -159,22 +159,14 @@ new (class EvalServer {
       .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
       .finally(() => isolate.dispose());
 
-    return this.stringify(result);
-  }
-
-  private stringify(result: any): string {
-    if (typeof result === "string") return result;
-
-    if (result instanceof Error) {
-      return result.message;
-    }
-
-    return inspect(result);
+    return result.slice(0, 3000);
   }
 
   private authenticate(req: Request, res: Response, next: NextFunction) {
-    const auth = req.headers.authorization?.replace(/^Bearer /, "");
-    if (auth !== this.config.auth) {
+    const posessed = Buffer.alloc(5, this.config.auth)
+    const provided = Buffer.alloc(5, req.headers.authorization.replace("Bearer ", ""))
+
+    if (!timingSafeEqual(posessed, provided)) {
       return res.status(418).send({
         data: [],
         statusCode: 418,
