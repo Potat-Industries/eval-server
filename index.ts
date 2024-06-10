@@ -5,7 +5,7 @@ import express, {
   NextFunction,
   json,
 } from "express";
-import { ExternalCopy, Isolate, Reference } from "isolated-vm";
+import { ExternalCopy, Isolate, Reference, Copy } from "isolated-vm";
 import { timingSafeEqual } from "crypto";
 import { Utils } from "./sandbox-utils.js";
 
@@ -33,6 +33,8 @@ new (class EvalServer {
   private config: Config;
   private queue: Waiter[] = [];
   private processing: boolean = false;
+  private concurrencyCounter: number = 0;
+  private maxConcurrency: number = 10;
 
   constructor(config: Config) {
     this.config = config;
@@ -129,53 +131,7 @@ new (class EvalServer {
               result: { copy: true, promise: true } 
             })
           `,
-          [
-            new Reference(async function (url: string, options: any) {
-              const timeout = () => {
-                const controller = new AbortController();
-                setTimeout(() => controller.abort(), 5000);
-                return controller.signal;
-              }
-
-              const isLocalhost = (url: string) => {
-                try {
-                  const parsedUrl = new URL(url);
-                  const hostname = parsedUrl.hostname;
-                  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-                } catch (e) {
-                  return false;
-                }
-              };
-
-              if (isLocalhost(url)) {
-                return new ExternalCopy({ body: 'Requests to localhost are not allowed.', status: 403 }).copyInto();
-              }
-
-              try {
-                const response = await fetch(url, {
-                  ...options ?? {},
-                  signal: timeout(),
-                  headers: {
-                    ...options?.headers ?? {},
-                    'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/'
-                  }
-                })
-
-                const blob = await response.blob();
-
-                let data: any;
-                try { data = JSON.parse(await blob.text()); } 
-                catch { data = await blob.text(); }
-
-                return new ExternalCopy({ body: data, status: response.status }).copyInto();
-              } catch (e) {
-                if (e.constructor.name === 'DOMException') {
-                  return new ExternalCopy({ body: 'Request timed out.', status: 408 }).copyInto();
-                }
-                return new ExternalCopy(e.toString()).copyInto();
-              }
-            })
-          ]
+          [new Reference(this.fetchImplement.bind(this))]
         );
 
         await Utils.inject(jail);
@@ -200,7 +156,75 @@ new (class EvalServer {
       .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
       .finally(() => isolate.dispose());
 
+    this.concurrencyCounter = 0;
+
     return (result ?? null)?.slice(0, 3000);
+  }
+
+  private async fetchImplement(url: string, options: Record<string, any>): Promise<Copy<any>> {
+    if (this.isLocalhost(url)) {
+      return new ExternalCopy({ 
+        body: 'Requests to localhost are not allowed.', 
+        status: 403 
+      }).copyInto();
+    }
+
+    this.concurrencyCounter++;
+    
+    try {
+      if (this.concurrencyCounter > this.maxConcurrency) {
+        return new ExternalCopy({ 
+          body: 'Too many requests.', 
+          status: 429 
+        }).copyInto();
+      }
+
+      const response = await fetch(url, {
+        ...options ?? {},
+        signal: this.timeout(),
+        headers: {
+          ...options?.headers ?? {},
+          'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/'
+        }
+      })
+
+      const blob = await response.blob();
+
+      return new ExternalCopy({ 
+        body: await this.parseBlob(blob), 
+        status: response.status 
+      }).copyInto();
+    } catch (e) {
+      if (e.constructor.name === 'DOMException') {
+        return new ExternalCopy({ body: 'Request timed out.', status: 408 }).copyInto();
+      }
+      return new ExternalCopy(e.toString()).copyInto();
+    } finally {
+      this.concurrencyCounter--;
+    }
+  }
+
+  private timeout() {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 5000);
+    return controller.signal;
+  }
+
+  private isLocalhost(url: string) {
+    try {
+      const parsedUrl = new URL(url);
+      const hostname = parsedUrl.hostname;
+      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    } catch (e) {
+      return false;
+    }
+  };
+
+  private async parseBlob(blob: Blob): Promise<string> {
+    let data: any;
+    try { data = JSON.parse(await blob.text()); } 
+    catch { data = await blob.text(); }
+    return data;
   }
 
   private authenticate(req: Request, res: Response, next: NextFunction) {
