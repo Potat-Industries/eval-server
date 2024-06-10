@@ -137,6 +137,20 @@ new (class EvalServer {
                 return controller.signal;
               }
 
+              const isLocalhost = (url: string) => {
+                try {
+                  const parsedUrl = new URL(url);
+                  const hostname = parsedUrl.hostname;
+                  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+                } catch (e) {
+                  return false;
+                }
+              };
+
+              if (isLocalhost(url)) {
+                return new ExternalCopy({ body: 'Requests to localhost are not allowed.', status: 403 }).copyInto();
+              }
+
               try {
                 const response = await fetch(url, {
                   ...options ?? {},
