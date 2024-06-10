@@ -12,6 +12,7 @@ import { Utils } from "./sandbox-utils.js";
 interface Config {
   port: number;
   auth: string;
+  maxFetchConcurrency: number;
 }
 
 interface Waiter {
@@ -34,9 +35,11 @@ new (class EvalServer {
   private queue: Waiter[] = [];
   private processing: boolean = false;
   private concurrencyCounter: number = 0;
-  private maxConcurrency: number = 10;
+
+  private readonly maxConcurrency: number;
 
   constructor(config: Config) {
+    this.maxConcurrency = config.maxFetchConcurrency ?? 5;
     this.config = config;
     this.server = express();
     this.server.use(json());
@@ -170,7 +173,7 @@ new (class EvalServer {
     }
 
     this.concurrencyCounter++;
-    
+
     try {
       if (this.concurrencyCounter > this.maxConcurrency) {
         return new ExternalCopy({ 
@@ -179,26 +182,31 @@ new (class EvalServer {
         }).copyInto();
       }
 
-      const response = await fetch(url, {
+      const { blob, status } = await fetch(url, {
         ...options ?? {},
         signal: this.timeout(),
+        redirect: 'error',
         headers: {
           ...options?.headers ?? {},
           'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/'
         }
       })
 
-      const blob = await response.blob();
-
       return new ExternalCopy({ 
-        body: await this.parseBlob(blob), 
-        status: response.status 
+        body: await this.parseBlob(await blob()), status 
       }).copyInto();
     } catch (e) {
+      // Promise aborted by timeout.
       if (e.constructor.name === 'DOMException') {
-        return new ExternalCopy({ body: 'Request timed out.', status: 408 }).copyInto();
+        return new ExternalCopy({ 
+          body: 'Request timed out.', 
+          status: 408 
+        }).copyInto();
       }
-      return new ExternalCopy(e.toString()).copyInto();
+      return new ExternalCopy({
+        body: `Reqest failed - ${e.constructor.name}: ${e.message}`,
+        status: 400
+      }).copyInto();
     } finally {
       this.concurrencyCounter--;
     }
