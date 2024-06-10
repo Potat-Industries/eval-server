@@ -47,14 +47,15 @@ new (class EvalServer {
       this.authenticate.bind(this),
       async (req: Request, res: Response) => {
         const start = performance.now();
-        const result = (await this.add(req.body.code, req.body.msg).catch(() =>
+        const result = (await this.add(req.body.code, req.body.msg).catch((e) => {
+          console.error(e);
           res.status(500).send({
             data: [],
             statusCode: 500,
             duration: parseFloat((performance.now() - start).toFixed(4)),
             errors: [{ message: "Internal server error" }],
           })
-        )) as EvalResponse;
+      })) as EvalResponse;
 
         return res.status(200).send({
           data: [String(result)],
@@ -146,11 +147,18 @@ new (class EvalServer {
                   }
                 })
 
-                const data = await response.clone().json().catch(() => response.clone().text());
-                return new ExternalCopy({ body: data, status: response.status }).copyInto();
+                const blob = await response.blob();
 
+                let data: any;
+                try { data = JSON.parse(await blob.text()); } 
+                catch { data = await blob.text(); }
+
+                return new ExternalCopy({ body: data, status: response.status }).copyInto();
               } catch (e) {
-                return new ExternalCopy(e).copyInto();
+                if (e.constructor.name === 'DOMException') {
+                  return new ExternalCopy({ body: 'Request timed out.', status: 408 }).copyInto();
+                }
+                return new ExternalCopy(e.toString()).copyInto();
               }
             })
           ]
@@ -178,7 +186,7 @@ new (class EvalServer {
       .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
       .finally(() => isolate.dispose());
 
-    return result.slice(0, 3000);
+    return (result ?? null)?.slice(0, 3000);
   }
 
   private authenticate(req: Request, res: Response, next: NextFunction) {
