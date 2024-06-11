@@ -182,7 +182,7 @@ new (class EvalServer {
         }).copyInto();
       }
 
-      const { blob, status } = await fetch(url, {
+      const res = await fetch(url, {
         ...options ?? {},
         signal: this.timeout(),
         redirect: 'error',
@@ -193,7 +193,7 @@ new (class EvalServer {
       })
 
       return new ExternalCopy({ 
-        body: await this.parseBlob(await blob()), status 
+        body: await this.parseBlob(await res.blob()), status: res.status 
       }).copyInto();
     } catch (e) {
       // Promise aborted by timeout.
@@ -203,6 +203,7 @@ new (class EvalServer {
           status: 408 
         }).copyInto();
       }
+      console.error(e);
       return new ExternalCopy({
         body: `Reqest failed - ${e.constructor.name}: ${e.message}`,
         status: 400
