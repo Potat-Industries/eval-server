@@ -6,9 +6,11 @@ import express, {
   json,
 } from "express";
 import { ExternalCopy, Isolate, Reference, Copy } from "isolated-vm";
-import { timingSafeEqual } from "crypto";
+import { Client, Dispatcher, fetch } from 'undici';
 import { Utils } from "./sandbox-utils.js";
-
+import { timingSafeEqual } from "crypto";
+import dns from "dns";
+import ip from 'ip';
 interface Config {
   port: number;
   auth: string;
@@ -151,7 +153,7 @@ new (class EvalServer {
             { arguments: { reference: true } }
           );
         } else {
-          code = prelude + `toString(eval('${code.replace(/[\\"']/g, "\\$&")}'))`;
+          code = prelude + `toString(eval('${code?.replace(/[\\"']/g, "\\$&")}'))`;
         }
 
         return context.eval(code, { timeout: 5000, promise: true });
@@ -165,13 +167,6 @@ new (class EvalServer {
   }
 
   private async fetchImplement(url: string, options: Record<string, any>): Promise<Copy<any>> {
-    if (this.isLocalhost(url)) {
-      return new ExternalCopy({ 
-        body: 'Requests to localhost are not allowed.', 
-        status: 403 
-      }).copyInto();
-    }
-
     this.concurrencyCounter++;
 
     try {
@@ -185,6 +180,7 @@ new (class EvalServer {
       const res = await fetch(url, {
         ...options ?? {},
         signal: this.timeout(),
+        dispatcher: new EvalDispatcher(url),
         redirect: 'error',
         headers: {
           ...options?.headers ?? {},
@@ -203,9 +199,8 @@ new (class EvalServer {
           status: 408 
         }).copyInto();
       }
-      console.error(e);
       return new ExternalCopy({
-        body: `Reqest failed - ${e.constructor.name}: ${e.message}`,
+        body: `Reqest failed - ${e.constructor.name}: ${e.cause ?? e.message}`,
         status: 400
       }).copyInto();
     } finally {
@@ -219,16 +214,6 @@ new (class EvalServer {
     return controller.signal;
   }
 
-  private isLocalhost(url: string) {
-    try {
-      const parsedUrl = new URL(url);
-      const hostname = parsedUrl.hostname;
-      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-    } catch (e) {
-      return false;
-    }
-  };
-
   private async parseBlob(blob: Blob): Promise<string> {
     let data: any;
     try { data = JSON.parse(await blob.text()); } 
@@ -238,7 +223,7 @@ new (class EvalServer {
 
   private authenticate(req: Request, res: Response, next: NextFunction) {
     const posessed = Buffer.alloc(5, this.config.auth)
-    const provided = Buffer.alloc(5, req.headers.authorization.replace("Bearer ", ""))
+    const provided = Buffer.alloc(5, req.headers.authorization?.replace("Bearer ", ""))
 
     if (!timingSafeEqual(posessed, provided)) {
       return res.status(418).send({
@@ -258,3 +243,35 @@ new (class EvalServer {
     });
   }
 })(require("./config.json"));
+
+class EvalDispatcher extends Dispatcher {
+  private dispatcher: Dispatcher;
+
+  constructor(url: string) {
+    const parsedURL = new URL(url).origin;
+    const dispatcher = new Client(parsedURL)
+    super();
+    this.dispatcher = dispatcher;
+  }
+
+  dispatch(options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandlers): boolean {
+    const { hostname } = new URL(options.origin || '');
+    dns.lookup(hostname, { all: true }, (err, addresses) => {
+      if (err) {
+        handler.onError(err)
+        throw err;
+      }
+      for (const { address } of addresses) {
+        const isPrivate = ip.isPrivate(address);
+        
+        if (isPrivate) {
+          handler.onError(new Error(`Access to ${address} is disallowed`));
+          return
+        }
+      }
+    });
+
+    this.dispatcher.dispatch(options, handler);
+    return true;
+  }
+}
