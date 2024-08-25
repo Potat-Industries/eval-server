@@ -118,8 +118,6 @@ new (class EvalServer {
 
         await jail.set("global", jail.derefInto());
 
-        /** @todo handle trimming of excess message data on application side */
-        delete msg?.channel?.data?.command_stats;
         delete msg?.channel?.commands;
         delete msg?.command?.description;
         delete msg?.channel?.blocks;
