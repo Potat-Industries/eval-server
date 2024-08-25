@@ -145,8 +145,7 @@ new (class EvalServer {
           code = prelude + `toString((async function evaluate() { ${code} })());`;
 
           await context.evalClosure(
-            `
-            evaluate = function() {
+           `evaluate = function() {
               return $0.apply(undefined, [], { result: { promise: true } })
             }`,
             [],
@@ -163,7 +162,7 @@ new (class EvalServer {
 
     this.concurrencyCounter = 0;
 
-    return (result ?? null)?.slice(0, 3000);
+    return (result ?? null)?.slice(0, 10000);
   }
 
   private async fetchImplement(url: string, options: Record<string, any>): Promise<Copy<any>> {
