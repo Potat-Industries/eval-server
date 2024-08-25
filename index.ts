@@ -31,6 +31,15 @@ interface EvalResponse {
   errors?: { message: string }[];
 }
 
+interface EvalPotatData {
+  user: Record<string, any> | undefined,
+  channel: Record<string, any> | undefined,
+  id: string,
+  timestamp: number,
+  platform: string,
+  isSilent: boolean,
+};
+
 new (class EvalServer {
   private server: Application;
   private config: Config;
@@ -109,11 +118,18 @@ new (class EvalServer {
 
         await jail.set("global", jail.derefInto());
 
-        /** @todo handle trimming of excess message data on application side */
-        delete msg?.channel?.data?.command_stats;
         delete msg?.channel?.commands;
         delete msg?.command?.description;
         delete msg?.channel?.blocks;
+
+        const potatData: EvalPotatData = {
+          user: msg?.user,
+          channel: msg?.channel,
+          id: `${msg?.id ?? ""}`,
+          timestamp: msg?.timestamp ?? Date.now(),
+          isSilent: !!msg?.command?.silent,
+          platform: msg?.platform ?? "PotatEval",
+        };
 
         const prelude = `
           'use strict'; 
@@ -136,7 +152,7 @@ new (class EvalServer {
               result: { copy: true, promise: true } 
             })
           `,
-          [new Reference(this.fetchImplement.bind(this))]
+          [new Reference(this.fetchImplement.bind(this, potatData))],
         );
 
         await Utils.inject(jail);
@@ -165,7 +181,7 @@ new (class EvalServer {
     return (result ?? null)?.slice(0, 10000);
   }
 
-  private async fetchImplement(url: string, options: Record<string, any>): Promise<Copy<any>> {
+  private async fetchImplement(potatData: EvalPotatData, url: string, options: Record<string, any>): Promise<Copy<any>> {
     this.concurrencyCounter++;
 
     try {
@@ -187,7 +203,8 @@ new (class EvalServer {
         }),
         headers: {
           ...options?.headers ?? {},
-          'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/'
+          'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/',
+          'x-potat-data': JSON.stringify(potatData),
         }
       })
 
