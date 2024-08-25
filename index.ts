@@ -6,7 +6,7 @@ import express, {
   json,
 } from "express";
 import { ExternalCopy, Isolate, Reference, Copy } from "isolated-vm";
-import { Client, Dispatcher, fetch } from 'undici';
+import { Agent, fetch, Pool } from 'undici';
 import { Utils } from "./sandbox-utils.js";
 import { timingSafeEqual } from "crypto";
 import dns from "dns";
@@ -180,8 +180,12 @@ new (class EvalServer {
       const res = await fetch(url, {
         ...options ?? {},
         signal: this.timeout(),
-        dispatcher: new EvalDispatcher(url),
-        redirect: 'error',
+        dispatcher: new Agent({
+          connect: {
+            lookup: this.dnsLookup.bind(this),
+          },
+          factory: this.dispatcherFactory.bind(this),
+        }),
         headers: {
           ...options?.headers ?? {},
           'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/'
@@ -200,7 +204,7 @@ new (class EvalServer {
         }).copyInto();
       }
       return new ExternalCopy({
-        body: `Reqest failed - ${e.constructor.name}: ${e.cause ?? e.message}`,
+        body: `Request failed - ${e.constructor.name}: ${e.cause ?? e.message}`,
         status: 400
       }).copyInto();
     } finally {
@@ -212,6 +216,44 @@ new (class EvalServer {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 5000);
     return controller.signal;
+  }
+
+  private dnsLookup(hostname: string, options: dns.LookupOptions, cb: (e: Error | null, address?: string | dns.LookupAddress[], family?: number) => void) {
+    dns.lookup(hostname, options, (err, addr, fam) => {
+      if (err !== null) {
+        return cb(err);
+      }
+
+      const addresses = Array.isArray(addr) ? addr : [addr];
+
+      try {
+        for (const lookupAddress of addresses) {
+          const value = typeof lookupAddress === 'string' ? lookupAddress : lookupAddress.address;
+
+          this.throwIfPrivateIP(value);
+        }
+      } catch (e) {
+        return cb(e);
+      }
+
+      cb(null, addr, fam);
+    });
+  }
+
+  private dispatcherFactory(origin: string, options: Pool.Options) {
+    const url = new URL(origin);
+
+    if (ip.isV4Format(url.hostname) || ip.isV6Format(url.hostname)) {
+      this.throwIfPrivateIP(url.hostname);
+    }
+
+    return new Pool(origin, options);
+  }
+
+  private throwIfPrivateIP(i: string) {
+    if (ip.isPrivate(i)) {
+      throw new Error(`Access to ${i} is disallowed`);
+    }
   }
 
   private async parseBlob(blob: Blob): Promise<string> {
@@ -243,35 +285,3 @@ new (class EvalServer {
     });
   }
 })(require("./config.json"));
-
-class EvalDispatcher extends Dispatcher {
-  private dispatcher: Dispatcher;
-
-  constructor(url: string) {
-    const parsedURL = new URL(url).origin;
-    const dispatcher = new Client(parsedURL)
-    super();
-    this.dispatcher = dispatcher;
-  }
-
-  dispatch(options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandlers): boolean {
-    const { hostname } = new URL(options.origin || '');
-    dns.lookup(hostname, { all: true }, (err, addresses) => {
-      if (err) {
-        handler.onError(err)
-        throw err;
-      }
-      for (const { address } of addresses) {
-        const isPrivate = ip.isPrivate(address);
-        
-        if (isPrivate) {
-          handler.onError(new Error(`Access to ${address} is disallowed`));
-          return
-        }
-      }
-    });
-
-    this.dispatcher.dispatch(options, handler);
-    return true;
-  }
-}
