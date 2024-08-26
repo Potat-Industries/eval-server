@@ -1,34 +1,29 @@
-import express, {
-  Request,
-  Response,
-  Application,
-  NextFunction,
-  json,
-} from "express";
+
 import { ExternalCopy, Isolate, Reference, Copy } from "isolated-vm";
 import { Agent, fetch, Pool } from 'undici';
 import { Utils } from "./sandbox-utils.js";
-import { timingSafeEqual } from "crypto";
 import dns from "dns";
 import ip from 'ip';
-interface Config {
+import { EvalSocket } from "server/socket.js";
+import { EvalServer } from "server/http.js";
+
+const config = require('./config.json');
+
+EvalServer.new(config);
+EvalSocket.new(config);
+
+export interface Config {
   port: number;
+  wssPort: number;
   auth: string;
   maxFetchConcurrency: number;
+  queueSize: number;
 }
-
 interface Waiter {
   code: string;
   msg: any;
   resolve: (value: any) => void;
   reject: (reason: any) => void;
-}
-
-interface EvalResponse {
-  data: any[];
-  statusCode: number;
-  duration: number;
-  errors?: { message: string }[];
 }
 
 interface EvalPotatData {
@@ -39,57 +34,28 @@ interface EvalPotatData {
   platform: string,
   isSilent: boolean,
 };
-
-new (class EvalServer {
-  private server: Application;
-  private config: Config;
+export class Evaluator {
+  private static instance: Evaluator;
+  
   private queue: Waiter[] = [];
   private processing: boolean = false;
   private concurrencyCounter: number = 0;
 
-  private readonly maxConcurrency: number;
+  private readonly MAX_CONCURRENCY: number;
+  private readonly QUEUE_SIZE: number;
 
-  constructor(config: Config) {
-    this.maxConcurrency = config.maxFetchConcurrency ?? 5;
-    this.config = config;
-    this.server = express();
-    this.server.use(json());
-    this.setupRoute();
+  private constructor(config: Config) {
+    this.MAX_CONCURRENCY = config.maxFetchConcurrency ?? 5;
+    this.QUEUE_SIZE = config.queueSize ?? 20;
   }
 
-  private setupRoute() {
-    this.server.post(
-      "/eval",
-      this.authenticate.bind(this),
-      async (req: Request, res: Response) => {
-        const start = performance.now();
-
-        try {
-          const result = await this.add(req.body.code, req.body.msg);
-
-          res.status(200).send({
-            data: [String(result)],
-            statusCode: 200,
-            duration: parseFloat((performance.now() - start).toFixed(4)),
-          } as EvalResponse);
-        } catch (e) {
-          console.error(e);
-
-          res.status(500).send({
-            data: [],
-            duration: parseFloat((performance.now() - start).toFixed(4)),
-            errors: [{ message: "Internal server error" }],
-          })
-        }
-      }
-    );
-
-    this.startServer();
+  public static new(config: Config): Evaluator {
+    return this.instance ?? (this.instance = new this(config));
   }
 
-  private async add(code: string, msg: any): Promise<any> {
+  public async add(code: string, msg: any): Promise<string> {
     return new Promise((resolve, reject) => {
-      if (this.queue.length > 20) reject("Queue is full");
+      if (this.queue.length > this.QUEUE_SIZE) reject("Queue is full");
       this.queue.push({ code, msg, resolve, reject } as Waiter);
       this.process();
     });
@@ -128,8 +94,6 @@ new (class EvalServer {
 
             await jail.set("global", jail.derefInto());
 
-            /** @todo handle trimming of excess message data on application side */
-            delete msg?.channel?.data?.command_stats;
             delete msg?.channel?.commands;
             delete msg?.command?.description;
             delete msg?.channel?.blocks;
@@ -202,7 +166,7 @@ new (class EvalServer {
     this.concurrencyCounter++;
 
     try {
-      if (this.concurrencyCounter > this.maxConcurrency) {
+      if (this.concurrencyCounter > this.MAX_CONCURRENCY) {
         return new ExternalCopy({ 
           body: 'Too many requests.', 
           status: 429 
@@ -295,26 +259,4 @@ new (class EvalServer {
     catch { data = await blob.text(); }
     return data;
   }
-
-  private authenticate(req: Request, res: Response, next: NextFunction) {
-    const posessed = Buffer.alloc(5, this.config.auth)
-    const provided = Buffer.alloc(5, req.headers.authorization?.replace("Bearer ", ""))
-
-    if (!timingSafeEqual(posessed, provided)) {
-      return res.status(418).send({
-        data: [],
-        statusCode: 418,
-        duration: 0,
-        errors: [{ message: "not today my little bish xqcL" }],
-      } as EvalResponse);
-    }
-
-    next();
-  }
-
-  private startServer() {
-    this.server.listen(this.config.port, () => {
-      console.log(`Server listening on port ${this.config.port}`);
-    });
-  }
-})(require("./config.json"));
+}
