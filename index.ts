@@ -1,21 +1,40 @@
-
+import os from "node:os";
 import { ExternalCopy, Isolate, Reference, Copy } from "isolated-vm";
 import { Agent, fetch, Pool } from 'undici';
-import { Utils } from "./sandbox-utils.js";
 import dns from "dns";
 import ip from 'ip';
-import { EvalSocket } from "./server/socket.js";
-import { EvalServer } from "./server/http.js";
+import { Utils } from "./sandbox-utils.js";
+import { EvalSocket, EvalResponse, EvalServer } from "./server";
 
 const config = require('./config.json');
 
 export interface Config {
   port: number;
-  wssPort: number;
   auth: string;
-  maxFetchConcurrency: number;
   queueSize: number;
+
+  fetchTimeout: number;
+  fetchMaxResponseLength: number;
+  maxFetchConcurrency: number;
+
+  vmMemoryLimit: number;
+  vmTimeout: number;
+
+  maxChildProcessCount: number;
 }
+
+const defaultConfig: Partial<Config> = {
+  fetchTimeout: 5000,
+  fetchMaxResponseLength: 10000,
+  maxFetchConcurrency: 5,
+  queueSize: 20,
+
+  vmMemoryLimit: 32,
+  vmTimeout: 6000,
+
+  maxChildProcessCount: os.availableParallelism(),
+}
+
 interface Waiter {
   code: string;
   msg: any;
@@ -33,26 +52,72 @@ interface EvalPotatData {
 };
 export class Evaluator {
   private static instance: Evaluator;
-  
+
   private queue: Waiter[] = [];
   private processing: boolean = false;
   private concurrencyCounter: number = 0;
 
-  private readonly MAX_CONCURRENCY: number;
-  private readonly QUEUE_SIZE: number;
-
-  private constructor(config: Config) {
-    this.MAX_CONCURRENCY = config.maxFetchConcurrency ?? 5;
-    this.QUEUE_SIZE = config.queueSize ?? 20;
+  public constructor(private readonly config: Config) {
+    this.startServer();
   }
 
-  public static new(config: Config): Evaluator {
-    return this.instance ?? (this.instance = new this(config));
+  private async startServer() {
+    const httpServer = new EvalServer(this.config.auth, this.handleEvalRequests.bind(this));
+
+    const server = httpServer.listen(this.config.port, () => {
+      console.log(`Server listening on port ${this.config.port}`);
+    });
+
+    new EvalSocket(server, this.config.auth, this.handleEvalRequests.bind(this));
   }
 
-  public async add(code: string, msg: any): Promise<string> {
+  private async handleEvalRequests(code: string, msg: any): Promise<EvalResponse> {
+    const start = performance.now();
+    const duration = () => parseFloat((performance.now() - start).toFixed(4));
+
+    if (!code || typeof code !== "string") {
+      return {
+        statusCode: 400,
+        data: [],
+        duration: duration(),
+        errors: [{
+          message: typeof code !== "string" ? "Invalid code" : "Missing code"
+        }],
+      };
+    }
+
+    if (msg && typeof msg !== "object") {
+      return {
+        statusCode: 400,
+        data: [],
+        duration: duration(),
+        errors: [{ message: "Invalid message" }],
+      };
+    }
+
+    try {
+      const result = await this.add(code, msg);
+
+      return {
+        statusCode: 200,
+        data: [String(result)],
+        duration: duration(),
+      };
+    } catch (e) {
+      console.error(e);
+
+      return {
+        statusCode: 500,
+        data: [],
+        duration: parseFloat((performance.now() - start).toFixed(4)),
+        errors: [{ message: "Internal server error" }],
+      }
+    }
+  }
+
+  private async add(code: string, msg: any): Promise<string> {
     return new Promise((resolve, reject) => {
-      if (this.queue.length > this.QUEUE_SIZE) reject("Queue is full");
+      if (this.queue.length > this.config.queueSize) reject("Queue is full");
       this.queue.push({ code, msg, resolve, reject } as Waiter);
       this.process();
     });
@@ -77,7 +142,7 @@ export class Evaluator {
   private async eval(code: string, msg): Promise<string> {
     return new Promise(async (resolve, reject) => {
       try {
-        const isolate = new Isolate({ 
+        const isolate = new Isolate({
           memoryLimit: 8,
           onCatastrophicError: (e) => {
             reject(e);
@@ -105,7 +170,7 @@ export class Evaluator {
             };
 
             const prelude = `
-              'use strict'; 
+              'use strict';
 
               function toString(value) {
                 if (typeof value === 'string') return value;
@@ -113,16 +178,16 @@ export class Evaluator {
                 if (value instanceof Promise) return value.then(toString);
                 if (Array.isArray(value)) return value.map(toString).join(', ');
                 return JSON.stringify(value);
-              } 
+              }
 
               let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg))});
             `;
 
             await context.evalClosure(`
-              global.fetch = (url, options) => $0.apply(undefined, [url, options], { 
-                  arguments: { copy: true }, 
-                  promise: true, 
-                  result: { copy: true, promise: true } 
+              global.fetch = (url, options) => $0.apply(undefined, [url, options], {
+                  arguments: { copy: true },
+                  promise: true,
+                  result: { copy: true, promise: true }
                 })
               `,
               [new Reference(this.fetchImplement.bind(this, potatData))],
@@ -163,10 +228,10 @@ export class Evaluator {
     this.concurrencyCounter++;
 
     try {
-      if (this.concurrencyCounter > this.MAX_CONCURRENCY) {
-        return new ExternalCopy({ 
-          body: 'Too many requests.', 
-          status: 429 
+      if (this.concurrencyCounter > this.config.maxFetchConcurrency) {
+        return new ExternalCopy({
+          body: 'Too many requests.',
+          status: 429
         }).copyInto();
       }
 
@@ -186,15 +251,15 @@ export class Evaluator {
         }
       })
 
-      return new ExternalCopy({ 
-        body: await this.parseBlob(await res.blob()), status: res.status 
+      return new ExternalCopy({
+        body: await this.parseBlob(await res.blob()), status: res.status
       }).copyInto();
     } catch (e) {
       // Promise aborted by timeout.
       if (e.constructor.name === 'DOMException') {
-        return new ExternalCopy({ 
-          body: 'Request timed out.', 
-          status: 408 
+        return new ExternalCopy({
+          body: 'Request timed out.',
+          status: 408
         }).copyInto();
       }
       return new ExternalCopy({
@@ -252,11 +317,13 @@ export class Evaluator {
 
   private async parseBlob(blob: Blob): Promise<string> {
     let data: any;
-    try { data = JSON.parse(await blob.text()); } 
+    try { data = JSON.parse(await blob.text()); }
     catch { data = await blob.text(); }
     return data;
   }
 }
 
-EvalServer.new(config);
-EvalSocket.new(config);
+new Evaluator({
+  ...defaultConfig,
+  ...config
+});

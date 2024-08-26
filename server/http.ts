@@ -1,3 +1,6 @@
+import http from 'node:http';
+import { EventEmitter } from 'node:events';
+import { timingSafeEqual } from "node:crypto";
 import express, {
   Request,
   Response,
@@ -5,40 +8,20 @@ import express, {
   NextFunction,
   json,
 } from "express";
-import { timingSafeEqual } from "crypto";
-import { Evaluator, Config } from "../index.js";
+import { EvalRequestHandler, EvalResponse } from './types.js';
 
-interface EvalResponse {
-  data: any[];
-  statusCode: number;
-  duration: number;
-  errors?: { message: string }[];
-}
-
-export class EvalServer {
-  private static instance: EvalServer;
+export class EvalServer extends EventEmitter {
   private server: Application;
 
-  private readonly PORT: number;
-  private readonly AUTHORIZATION: string;
-  private evaluator: Evaluator;
+  public constructor(
+    private readonly authToken: string,
+    private readonly handleEvalRequest: EvalRequestHandler,
+  ) {
+    super();
 
-  private constructor(config: Config) {
-    if (!config.port) {
-      console.error('No HTTP port provided. (Required)');
-      process.exit(1);
-    }
-
-    this.PORT = config.port;
-    this.AUTHORIZATION = config.auth;
-    this.evaluator = Evaluator.new(config);
     this.server = express();
     this.server.use(json());
     this.setupRoute();
-  }
-
-  public static new(config: Config): EvalServer {
-    return this.instance ?? (this.instance = new this(config));
   }
 
   private setupRoute() {
@@ -46,51 +29,15 @@ export class EvalServer {
       "/eval",
       this.authenticate.bind(this),
       async (req: Request, res: Response) => {
-        const start = performance.now();
+        const response = await this.handleEvalRequest(req.body.code, req.body.msg);
 
-        if (!req.body.code || typeof req.body.code !== "string") {
-          return res.status(400).send({
-            data: [],
-            duration: parseFloat((performance.now() - start).toFixed(4)),
-            errors: [{
-              message: typeof req.body.code !== "string" ? "Invalid code" : "Missing code"
-            }],
-          } as EvalResponse);
-        }
-
-        if (req.body.msg && typeof req.body.msg !== "object") {
-          return res.status(400).send({
-            data: [],
-            duration: parseFloat((performance.now() - start).toFixed(4)),
-            errors: [{ message: "Invalid message" }],
-          } as EvalResponse);
-        }
-
-        try {
-          const result = await this.evaluator.add(req.body.code,  req.body.msg);
-
-          res.status(200).send({
-            data: [String(result)],
-            statusCode: 200,
-            duration: parseFloat((performance.now() - start).toFixed(4)),
-          } as EvalResponse);
-        } catch (e) {
-          console.error(e);
-
-          res.status(500).send({
-            data: [],
-            duration: parseFloat((performance.now() - start).toFixed(4)),
-            errors: [{ message: "Internal server error" }],
-          })
-        }
+        return res.status(response.statusCode).send(response);
       }
     );
-
-    this.startServer();
   }
 
   private authenticate(req: Request, res: Response, next: NextFunction) {
-    const posessed = Buffer.alloc(5, this.AUTHORIZATION)
+    const posessed = Buffer.alloc(5, this.authToken)
     const provided = Buffer.alloc(5, req.headers.authorization?.replace("Bearer ", ""))
 
     if (!timingSafeEqual(posessed, provided)) {
@@ -105,9 +52,7 @@ export class EvalServer {
     next();
   }
 
-  private startServer() {
-    this.server.listen(this.PORT, () => {
-      console.log(`EvalServer listening on port ${this.PORT}`);
-    });
+  public listen(port: number, callback?: () => void): http.Server {
+    return this.server.listen(port, callback);
   }
 }

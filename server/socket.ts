@@ -1,7 +1,7 @@
-import WS from 'ws';
-import { Config, Evaluator } from '../index';
-import { IncomingMessage } from 'node:http';
-import { timingSafeEqual } from "crypto";
+import * as http from 'node:http';
+import { timingSafeEqual } from "node:crypto";
+import { WebSocketServer, WebSocket } from 'ws';
+import { EvalRequestHandler } from './types';
 
 enum EventCodes {
   MALFORMED_DATA = 4000,
@@ -13,51 +13,39 @@ enum EventCodes {
 interface EvalMessage {
   code: string;
   msg?: string;
+  id: number;
 }
 
 export class EvalSocket {
-  private static instance: EvalSocket;
+  private ws: WebSocketServer;
 
-  private wss: WS.Server;
-  private evaluator: Evaluator
+  public constructor(
+    server: http.Server,
+    private readonly authToken: string,
+    private readonly handleEvalRequest: EvalRequestHandler,
+  ) {
+    this.ws = new WebSocketServer({
+      server: server,
+      path: '/socket'
+    });
 
-  private readonly PORT: number;
-  private readonly AUTHORIZATION: string;
-
-  private constructor(config: Config) {
-    if (!config.wssPort) {
-      console.error('No WSS port provided. (Required)');
-      process.exit(1);
-    }
-
-    this.PORT = config.wssPort;
-    this.AUTHORIZATION = config.auth;
-
-    this.evaluator = Evaluator.new(config);
-    this.wss = new WS.Server({ port: this.PORT });
-
-    console.log(`EvalSocket listening on port ${this.PORT}`);
-
-    this.wss.on('connection', (client: WS.WebSocket, req: IncomingMessage) => {
+    this.ws.on('connection', (client: WebSocket, req: http.IncomingMessage) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);
       const token = url.searchParams.get('auth');
 
       if (!token || !this.validateToken(token)) {
+        console.error('Unauthorized socket connection.', token);
         return client.close(EventCodes.UNAUTHORIZED, 'Unauthorized');
       }
 
       this.setupListeners(client);
-    });
+    })
   }
 
-  public static new(config: Config): EvalSocket {
-    return this.instance ?? (this.instance = new this(config));
-  }
-
-  private setupListeners(client: WS.WebSocket): void {
-    client.on('message', (msg: MessageEvent) => {
+  private setupListeners(client: WebSocket): void {
+    client.on('message', async (msg: MessageEvent) => {
       let data: EvalMessage;
-      try { data = JSON.parse(msg.data); }
+      try { data = JSON.parse(msg.toString()); }
       catch (e) {
         return this.send(
           client,
@@ -66,26 +54,11 @@ export class EvalSocket {
         );
       }
 
-      if (!data?.code || typeof data.code !== 'string') {
-        return this.send(
-          client,
-          { error: 'Invalid or malformed code received.' },
-          EventCodes.MALFORMED_DATA
-        );
-      }
-
-      if (msg && typeof msg !== 'object') {
-        return this.send(
-          client,
-          { error: 'Invalid or malformed message received.' },
-          EventCodes.MALFORMED_DATA
-        );
-      }
-
-      return this.evaluator
-        .add(data.code, data.msg)
-        .then((data) => this.send(client, { data }, EventCodes.DISPATCH))
-        .catch((error) => this.send(client, { error }, EventCodes.UNKNOWN_ERROR));
+      const response = await this.handleEvalRequest(data.code, data.msg);
+      this.send(client, {
+        ...response,
+        id: data.id,
+      }, EventCodes.DISPATCH);
     });
 
     client.on('error', () => {
@@ -96,8 +69,8 @@ export class EvalSocket {
     });
   }
 
-  private send(client: WS.WebSocket, data: any, op: EventCodes): void {
-    if (client.readyState === WS.OPEN) {
+  private send(client: WebSocket, data: any, op: EventCodes): void {
+    if (client.readyState === WebSocket.OPEN) {
       client.send(
         JSON.stringify({
           opcode: op ?? EventCodes.DISPATCH,
@@ -108,7 +81,7 @@ export class EvalSocket {
   }
 
   private validateToken(auth: string): boolean {
-    const posessed = Buffer.alloc(5, this.AUTHORIZATION);
+    const posessed = Buffer.alloc(5, this.authToken);
     const provided = Buffer.alloc(5, auth);
 
     return timingSafeEqual(posessed, provided);
