@@ -52,8 +52,8 @@ export class EvalServer {
           return res.status(400).send({
             data: [],
             duration: parseFloat((performance.now() - start).toFixed(4)),
-            errors: [{ 
-              message: typeof req.body.code !== "string" ? "Invalid code" : "Missing code" 
+            errors: [{
+              message: typeof req.body.code !== "string" ? "Invalid code" : "Missing code"
             }],
           } as EvalResponse);
         }

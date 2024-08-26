@@ -32,7 +32,7 @@ export class EvalSocket {
 
     this.PORT = config.wssPort;
     this.AUTHORIZATION = config.auth;
-    
+
     this.evaluator = Evaluator.new(config);
     this.wss = new WS.Server({ port: this.PORT });
 
@@ -41,7 +41,7 @@ export class EvalSocket {
     this.wss.on('connection', (client: WS.WebSocket, req: IncomingMessage) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);
       const token = url.searchParams.get('auth');
-    
+
       if (!token || !this.validateToken(token)) {
         return client.close(EventCodes.UNAUTHORIZED, 'Unauthorized');
       }
@@ -57,10 +57,10 @@ export class EvalSocket {
   private setupListeners(client: WS.WebSocket): void {
     client.on('message', (msg: MessageEvent) => {
       let data: EvalMessage;
-      try { data = JSON.parse(msg.data); } 
+      try { data = JSON.parse(msg.data); }
       catch (e) {
         return this.send(
-          client, 
+          client,
           { error: 'Malformed JSON received.' },
           EventCodes.MALFORMED_DATA
         );
@@ -68,7 +68,7 @@ export class EvalSocket {
 
       if (!data?.code || typeof data.code !== 'string') {
         return this.send(
-          client, 
+          client,
           { error: 'Invalid or malformed code received.' },
           EventCodes.MALFORMED_DATA
         );
@@ -76,7 +76,7 @@ export class EvalSocket {
 
       if (msg && typeof msg !== 'object') {
         return this.send(
-          client, 
+          client,
           { error: 'Invalid or malformed message received.' },
           EventCodes.MALFORMED_DATA
         );
