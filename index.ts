@@ -63,21 +63,24 @@ new (class EvalServer {
       this.authenticate.bind(this),
       async (req: Request, res: Response) => {
         const start = performance.now();
-        const result = (await this.add(req.body.code, req.body.msg).catch((e) => {
+
+        try {
+          const result = await this.add(req.body.code, req.body.msg);
+
+          res.status(200).send({
+            data: [String(result)],
+            statusCode: 200,
+            duration: parseFloat((performance.now() - start).toFixed(4)),
+          } as EvalResponse);
+        } catch (e) {
           console.error(e);
+
           res.status(500).send({
             data: [],
-            statusCode: 500,
             duration: parseFloat((performance.now() - start).toFixed(4)),
             errors: [{ message: "Internal server error" }],
           })
-      })) as EvalResponse;
-
-        return res.status(200).send({
-          data: [String(result)],
-          statusCode: 200,
-          duration: parseFloat((performance.now() - start).toFixed(4)),
-        } as EvalResponse);
+        }
       }
     );
 
