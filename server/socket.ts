@@ -25,11 +25,18 @@ export class EvalSocket {
   private readonly AUTHORIZATION: string;
 
   private constructor(config: Config) {
+    if (!config.wssPort) {
+      console.error('No WSS port provided. (Required)');
+      process.exit(1);
+    }
+
     this.PORT = config.wssPort;
     this.AUTHORIZATION = config.auth;
     
     this.evaluator = Evaluator.new(config);
     this.wss = new WS.Server({ port: this.PORT });
+
+    console.log(`EvalSocket listening on port ${this.PORT}`);
 
     this.wss.on('connection', (client: WS.WebSocket, req: IncomingMessage) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);

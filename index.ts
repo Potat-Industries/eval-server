@@ -4,13 +4,10 @@ import { Agent, fetch, Pool } from 'undici';
 import { Utils } from "./sandbox-utils.js";
 import dns from "dns";
 import ip from 'ip';
-import { EvalSocket } from "server/socket.js";
-import { EvalServer } from "server/http.js";
+import { EvalSocket } from "./server/socket.js";
+import { EvalServer } from "./server/http.js";
 
 const config = require('./config.json');
-
-EvalServer.new(config);
-EvalSocket.new(config);
 
 export interface Config {
   port: number;
@@ -260,3 +257,6 @@ export class Evaluator {
     return data;
   }
 }
+
+EvalServer.new(config);
+EvalSocket.new(config);

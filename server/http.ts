@@ -24,6 +24,11 @@ export class EvalServer {
   private evaluator: Evaluator;
 
   private constructor(config: Config) {
+    if (!config.port) {
+      console.error('No HTTP port provided. (Required)');
+      process.exit(1);
+    }
+
     this.PORT = config.port;
     this.AUTHORIZATION = config.auth;
     this.evaluator = Evaluator.new(config);
@@ -102,7 +107,7 @@ export class EvalServer {
 
   private startServer() {
     this.server.listen(this.PORT, () => {
-      console.log(`Server listening on port ${this.PORT}`);
+      console.log(`EvalServer listening on port ${this.PORT}`);
     });
   }
 }
