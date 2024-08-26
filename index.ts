@@ -112,76 +112,90 @@ new (class EvalServer {
   }
 
   private async eval(code: string, msg): Promise<string> {
-    const isolate = new Isolate({ memoryLimit: 32 });
+    return new Promise(async (resolve, reject) => {
+      try {
+        const isolate = new Isolate({ 
+          memoryLimit: 8,
+          onCatastrophicError: (e) => {
+            reject(e);
+          }
+        });
 
-    const result = await isolate
-      .createContext()
-      .then(async (context) => {
-        const jail = context.global;
+        const result = await isolate
+          .createContext()
+          .then(async (context) => {
+            const jail = context.global;
 
-        await jail.set("global", jail.derefInto());
+            await jail.set("global", jail.derefInto());
 
-        delete msg?.channel?.commands;
-        delete msg?.command?.description;
-        delete msg?.channel?.blocks;
+            /** @todo handle trimming of excess message data on application side */
+            delete msg?.channel?.data?.command_stats;
+            delete msg?.channel?.commands;
+            delete msg?.command?.description;
+            delete msg?.channel?.blocks;
 
-        const potatData: EvalPotatData = {
-          user: msg?.user,
-          channel: msg?.channel,
-          id: `${msg?.id ?? ""}`,
-          timestamp: msg?.timestamp ?? Date.now(),
-          isSilent: !!msg?.command?.silent,
-          platform: msg?.platform ?? "PotatEval",
-        };
+            const potatData: EvalPotatData = {
+              user: msg?.user,
+              channel: msg?.channel,
+              id: `${msg?.id ?? ""}`,
+              timestamp: msg?.timestamp ?? Date.now(),
+              isSilent: !!msg?.command?.silent,
+              platform: msg?.platform ?? "PotatEval",
+            };
 
-        const prelude = `
-          'use strict'; 
+            const prelude = `
+              'use strict'; 
 
-          function toString(value) {
-            if (typeof value === 'string') return value;
-            if (value instanceof Error) return value.constructor.name + ': ' + value.message;
-            if (value instanceof Promise) return value.then(toString);
-            if (Array.isArray(value)) return value.map(toString).join(', ');
-            return JSON.stringify(value);
-          } 
+              function toString(value) {
+                if (typeof value === 'string') return value;
+                if (value instanceof Error) return value.constructor.name + ': ' + value.message;
+                if (value instanceof Promise) return value.then(toString);
+                if (Array.isArray(value)) return value.map(toString).join(', ');
+                return JSON.stringify(value);
+              } 
 
-          let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg))});
-        `;
+              let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg))});
+            `;
 
-        await context.evalClosure(`
-          global.fetch = (url, options) => $0.apply(undefined, [url, options], { 
-              arguments: { copy: true }, 
-              promise: true, 
-              result: { copy: true, promise: true } 
-            })
-          `,
-          [new Reference(this.fetchImplement.bind(this, potatData))],
-        );
+            await context.evalClosure(`
+              global.fetch = (url, options) => $0.apply(undefined, [url, options], { 
+                  arguments: { copy: true }, 
+                  promise: true, 
+                  result: { copy: true, promise: true } 
+                })
+              `,
+              [new Reference(this.fetchImplement.bind(this, potatData))],
+            );
 
-        await Utils.inject(jail);
+            await Utils.inject(jail);
 
-        if (/return|await/.test(code)) {
-          code = prelude + `toString((async function evaluate() { ${code} })());`;
+            if (/return|await/.test(code)) {
+              code = prelude + `toString((async function evaluate() { ${code} })());`;
 
-          await context.evalClosure(
-           `evaluate = function() {
-              return $0.apply(undefined, [], { result: { promise: true } })
-            }`,
-            [],
-            { arguments: { reference: true } }
-          );
-        } else {
-          code = prelude + `toString(eval('${code?.replace(/[\\"']/g, "\\$&")}'))`;
-        }
+              await context.evalClosure(
+                `
+                evaluate = function() {
+                  return $0.apply(undefined, [], { result: { promise: true } })
+                }`,
+                [],
+                { arguments: { reference: true } }
+              );
+            } else {
+              code = prelude + `toString(eval('${code?.replace(/[\\"']/g, "\\$&")}'))`;
+            }
 
-        return context.eval(code, { timeout: 5000, promise: true });
-      })
-      .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
-      .finally(() => isolate.dispose());
+            return context.eval(code, { timeout: 5000, promise: true });
+          })
+          .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
+          .finally(() => isolate.dispose());
 
-    this.concurrencyCounter = 0;
+        this.concurrencyCounter = 0;
 
-    return (result ?? null)?.slice(0, 10000);
+        resolve((result ?? null)?.slice(0, 3000));
+      } catch (e) {
+        reject(e);
+      }
+    });
   }
 
   private async fetchImplement(potatData: EvalPotatData, url: string, options: Record<string, any>): Promise<Copy<any>> {
