@@ -55,7 +55,7 @@ interface EvalPotatData {
 interface EvalWorker {
   readonly isReady: boolean,
   readonly queueSize: number,
-  readonly eval: (code: string, msg: Record<string, any>, timeout: number) => Promise<string>;
+  readonly eval: (code: string, msg: Record<string, any>, timeout: number) => Promise<string[]>;
 };
 
 interface EvalWorkerRequest {
@@ -125,7 +125,7 @@ export class Evaluator {
         this.keepWorkerAlive();
       }
 
-      public eval(code: string, msg: Record<string, any>, timeout: number): Promise<string> {
+      public eval(code: string, msg: Record<string, any>, timeout: number): Promise<string[]> {
         return new Promise((resolve, reject) => {
           let tm = setTimeout(() => {
             reject(new Error('Worker timed out'));
@@ -274,12 +274,12 @@ export class Evaluator {
 
     try {
       const worker = this.pickWorker();
-      const result = await worker.eval(code, msg, this.config.vmTimeout);
+      const data = await worker.eval(code, msg, this.config.vmTimeout);
 
       return {
         statusCode: 200,
-        data: [result],
         duration: duration(),
+        data,
       }
     } catch (e) {
       console.error(e);
@@ -301,6 +301,8 @@ export class Evaluator {
     if (!worker) {
       throw new Error("No workers available");
     }
+
+    console.log(`Picked worker ${this.workers.indexOf(worker)} with ${worker?.queueSize} requests`, this.workers.map(w => w.queueSize).join(', '));
 
     return worker;
   }
