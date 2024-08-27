@@ -6,6 +6,7 @@ import dns from "dns";
 import ip from 'ip';
 import { Utils } from "./sandbox-utils.js";
 import { EvalSocket, EvalResponse, EvalServer } from "./server";
+import { PotatWorker, PotatWorkersPool } from "./workers";
 
 const config = require('./config.json');
 
@@ -18,6 +19,8 @@ export interface Config {
   fetchMaxResponseLength: number;
   maxFetchConcurrency: number;
 
+  workersTimeOut: number;
+
   vmMemoryLimit: number;
   vmTimeout: number;
 
@@ -29,6 +32,8 @@ const defaultConfig: Partial<Config> = {
   fetchMaxResponseLength: 10000,
   maxFetchConcurrency: 5,
   queueSize: 20,
+
+  workersTimeOut: 6e5,
 
   vmMemoryLimit: 32,
   vmTimeout: 10000,
@@ -52,43 +57,24 @@ interface EvalPotatData {
   isSilent: boolean,
 };
 
-interface EvalWorker {
-  readonly isReady: boolean,
-  readonly queueSize: number,
-  readonly eval: (code: string, msg: Record<string, any>, timeout: number) => Promise<string[]>;
-};
-
-interface EvalWorkerRequest {
-  type: 'EvalRequest';
-  code: string;
-  msg: Record<string, any>;
-  id: number;
-}
-
-interface EvalWorkerResponse {
-  type: 'EvalResponse';
-  data: EvalResponse;
-  id: number;
-}
-
 export class Evaluator {
   private queue: Waiter[] = [];
   private processing: boolean = false;
   private concurrencyCounter: number = 0;
 
-  private workers: EvalWorker[] = [];
+  private readonly pool: PotatWorkersPool<typeof this.add>;
 
   public constructor(private readonly config: Config) {
     if (Cluster.isPrimary) {
       this.startServer();
-
-      for (let i = 0; i < Math.max(1, this.config.maxChildProcessCount); i++) {
-        console.log('Forking new worker', i);
-        this.forkWorker();
-      }
-    } else {
-      this.worker();
     }
+
+    this.pool = new PotatWorkersPool(this.add.bind(this), Math.max(1, config.maxChildProcessCount), {
+      maxQueueSizePerWorker: this.config.queueSize,
+
+      workerTimeOut: this.config.workersTimeOut,
+      workerExecutionTimeout: this.config.vmTimeout,
+    });
   }
 
   private async startServer() {
@@ -99,154 +85,6 @@ export class Evaluator {
     });
 
     new EvalSocket(server, this.config.auth, this.handleEvalRequests.bind(this));
-  }
-
-  private async forkWorker() {
-    this.workers.push(new class {
-      private requestsHandler: ((
-        code: string,
-        msg: Record<string, any>,
-        id: number,
-        callback: (m: EvalResponse) => void
-      ) => void) | undefined;
-
-      private id = 0;
-
-      private queueSizeValue: { value: number } | undefined;
-
-      public get isReady() {
-        return typeof this.requestsHandler === 'function';
-      }
-
-      public get queueSize() {
-        return this.queueSizeValue?.value ?? 0;
-      }
-
-      constructor() {
-        this.keepWorkerAlive();
-      }
-
-      public eval(code: string, msg: Record<string, any>, timeout: number): Promise<string[]> {
-        return new Promise((resolve, reject) => {
-          let tm = setTimeout(() => {
-            reject(new Error('Worker timed out'));
-          }, timeout);
-
-          if (!this.isReady) {
-            return reject(new Error('Worker is not ready'));
-          }
-
-          const watcher = (m) => {
-            resolve(m);
-            clearTimeout(tm);
-          };
-
-          this.requestsHandler!(code, msg, this.id++, watcher);
-        });
-      }
-
-      private async keepWorkerAlive() {
-        while (true) {
-          try {
-            const abortController = new AbortController();
-            const worker = Cluster.fork();
-            const callbacks = new Map<number, (m: EvalResponse) => void>();
-            const queueSizeValue = { value: 0 };
-            let lastRequest = 0;
-            let lastResponse = 0;
-
-            this.queueSizeValue = queueSizeValue;
-            this.requestsHandler = (code: string, msg: Record<string, any>, id: number, callback: (m: EvalResponse) => void) => {
-              // didn't receive a response for more than 1 minute
-              if (lastRequest > lastResponse && Date.now() - lastRequest > 6e4) {
-                abortController.abort();
-
-                return callback({
-                  data: [],
-                  statusCode: 500,
-                  duration: 0,
-                  errors: [{ message: 'Worker is not responding' }],
-                });
-              }
-
-              queueSizeValue.value = queueSizeValue.value + 1;
-              worker.send({ type: 'EvalRequest', code, msg, id });
-              lastRequest = Date.now();
-              callbacks.set(id, callback);
-            }
-
-
-            worker.addListener('message', (m: EvalWorkerResponse) => {
-              if (m.type === 'EvalResponse') {
-                lastResponse = Date.now();
-                queueSizeValue.value = queueSizeValue.value - 1;
-
-                callbacks.get(m.id)?.(m.data);
-              }
-            });
-
-            await new Promise<void>(async (resolve, reject) => {
-              worker?.on('exit', (code) => {
-                if (code === 0) {
-                  resolve();
-                } else {
-                  reject(`Worker exited with code ${code}`);
-                }
-              });
-
-              worker?.on('error', reject);
-
-              abortController.signal.addEventListener('abort', () => {
-                try {
-                  reject(new Error('Worker is not responding'));
-                  worker.kill('SIGKILL');
-                } catch (e) {
-                  console.error('Failed to kill worker:', e);
-                }
-              })
-            });
-
-            this.requestsHandler = undefined;
-          } catch (e) {
-            console.error('Worker died', e);
-          }
-
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          console.error('Forking new worker...');
-        }
-      }
-    });
-  }
-
-  private worker() {
-    process.addListener('message', async (m: EvalWorkerRequest) => {
-      if (m.type === 'EvalRequest') {
-        try {
-          const result = await this.add(m.code, m.msg);
-
-          process.send({
-            type: 'EvalResponse',
-            id: m.id,
-            data: [String(result)],
-            statusCode: 200,
-            duration: NaN,
-          });
-        } catch (e) {
-          console.error(e);
-
-          process.send({
-            type: 'EvalResponse',
-            id: m.id,
-            data: [],
-            statusCode: 500,
-            duration: NaN,
-            errors: [{
-              message: String(e)
-            }],
-          });
-        }
-      }
-    });
   }
 
   private async handleEvalRequests(code: string, msg: any): Promise<EvalResponse> {
@@ -274,13 +112,13 @@ export class Evaluator {
     }
 
     try {
-      const worker = this.pickWorker();
-      const data = await worker.eval(code, msg, this.config.vmTimeout);
+      const result = await this.pool.add(code, msg);
 
       return {
         statusCode: 200,
         duration: duration(),
-        data,
+        data: [result],
+        errors: [],
       }
     } catch (e) {
       console.error(e);
@@ -288,29 +126,14 @@ export class Evaluator {
       return {
         statusCode: 500,
         data: [],
-        duration: parseFloat((performance.now() - start).toFixed(4)),
-        errors: [{ message: "Internal server error" }],
+        duration: duration(),
+        errors: [{ message: e.message || "Internal server error" }],
       }
     }
   }
 
-  private pickWorker() {
-    const worker = this.workers
-      .filter(w => w.isReady)
-      .sort((a, b) => a.queueSize - b.queueSize)[0];
-
-    if (!worker) {
-      throw new Error("No workers available");
-    }
-
-    console.log(`Picked worker ${this.workers.indexOf(worker)} with ${worker?.queueSize} requests`, this.workers.map(w => w.queueSize).join(', '));
-
-    return worker;
-  }
-
   private async add(code: string, msg: any): Promise<string> {
     return new Promise((resolve, reject) => {
-      if (this.queue.length > this.config.queueSize) reject("Queue is full");
       this.queue.push({ code, msg, resolve, reject } as Waiter);
       this.process();
     });
@@ -403,14 +226,14 @@ export class Evaluator {
               code = prelude + `toString(eval('${code?.replace(/[\\"']/g, "\\$&")}'))`;
             }
 
-            return context.eval(code, { timeout: 5000, promise: true });
+            return context.eval(code, { timeout: this.config.vmTimeout + 1e3, promise: true });
           })
           .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
           .finally(() => isolate.dispose());
 
         this.concurrencyCounter = 0;
 
-        resolve((result ?? null)?.slice(0, 3000));
+        resolve((result ?? null)?.slice(0, this.config.fetchMaxResponseLength));
       } catch (e) {
         reject(e);
       }
@@ -466,7 +289,7 @@ export class Evaluator {
 
   private timeout() {
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 5000);
+    setTimeout(() => controller.abort(), this.config.fetchTimeout);
     return controller.signal;
   }
 
