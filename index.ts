@@ -139,7 +139,7 @@ export class Evaluator {
     this.processing = false;
   }
 
-  private async eval(code: string, msg): Promise<string> {
+  private async eval(code: string, msg?: Record<string, any>): Promise<string> {
     return new Promise(async (resolve, reject) => {
       try {
         const isolate = new Isolate({
@@ -180,7 +180,7 @@ export class Evaluator {
                 return JSON.stringify(value);
               }
 
-              let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg))});
+              let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg ?? {}))});
             `;
 
             await context.evalClosure(`
