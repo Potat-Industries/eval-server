@@ -31,7 +31,7 @@ const defaultConfig: Partial<Config> = {
   queueSize: 20,
 
   vmMemoryLimit: 32,
-  vmTimeout: 6000,
+  vmTimeout: 10000,
 
   maxChildProcessCount: os.availableParallelism(),
 }
@@ -83,6 +83,7 @@ export class Evaluator {
       this.startServer();
 
       for (let i = 0; i < Math.max(1, this.config.maxChildProcessCount); i++) {
+        console.log('Forking new worker', i);
         this.forkWorker();
       }
     } else {
@@ -189,7 +190,7 @@ export class Evaluator {
                 if (code === 0) {
                   resolve();
                 } else {
-                  reject('Worker exited with code ' + code);
+                  reject(`Worker exited with code ${code}`);
                 }
               });
 
@@ -200,7 +201,7 @@ export class Evaluator {
                   reject(new Error('Worker is not responding'));
                   worker.kill('SIGKILL');
                 } catch (e) {
-                  console.error('could not kill worker', e);
+                  console.error('Failed to kill worker:', e);
                 }
               })
             });
@@ -221,7 +222,7 @@ export class Evaluator {
     process.addListener('message', async (m: EvalWorkerRequest) => {
       if (m.type === 'EvalRequest') {
         try {
-          const result = await this.add(m.code, m.code);
+          const result = await this.add(m.code, m.msg);
 
           process.send({
             type: 'EvalResponse',
