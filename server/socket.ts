@@ -4,16 +4,24 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { EvalRequestHandler } from './types';
 
 enum EventCodes {
-  MALFORMED_DATA = 4000,
-  UNAUTHORIZED = 4001,
+  RECIEVED_DATA = 4000,
+  RECONNECT = 4001,
   UNKNOWN_ERROR = 4002,
-  DISPATCH = 4004
+  INVALID_ORIGIN = 4003,
+  DISPATCH = 4004,
+  HEARTBEAT = 4005,
+  MALFORMED_DATA = 4006,
+  UNAUTHORIZED = 4007
 }
 
 interface EvalMessage {
   code: string;
   msg?: string;
   id: number;
+}
+
+interface EvalWebSocket extends WebSocket {
+  _pingInterval: NodeJS.Timeout;
 }
 
 export class EvalSocket {
@@ -29,7 +37,7 @@ export class EvalSocket {
       path: '/socket'
     });
 
-    this.ws.on('connection', (client: WebSocket, req: http.IncomingMessage) => {
+    this.ws.on('connection', (client: EvalWebSocket, req: http.IncomingMessage) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);
       const token = url.searchParams.get('auth');
 
@@ -42,7 +50,7 @@ export class EvalSocket {
     })
   }
 
-  private setupListeners(client: WebSocket): void {
+  private setupListeners(client: EvalWebSocket): void {
     client.on('message', async (msg: MessageEvent) => {
       let data: EvalMessage;
       try { data = JSON.parse(msg.toString()); }
@@ -67,9 +75,17 @@ export class EvalSocket {
         'An unknown error occurred.'
       );
     });
+
+    client._pingInterval = setInterval(() => {
+      this.send(
+        client,
+        { timestamp: Date.now(), message: this.pickMessage() },
+        EventCodes.HEARTBEAT
+      )
+    }, 30_000);
   }
 
-  private send(client: WebSocket, data: any, op: EventCodes): void {
+  private send(client: EvalWebSocket, data: any, op: EventCodes): void {
     if (client.readyState === WebSocket.OPEN) {
       client.send(
         JSON.stringify({
@@ -85,5 +101,20 @@ export class EvalSocket {
     const provided = Buffer.alloc(5, auth);
 
     return timingSafeEqual(posessed, provided);
+  }
+
+  /** Extremely critical */
+  private pickMessage(): string {
+    const messages = [
+      'Skibidy toilet!!',
+      'fortniteburger.net',
+      'amongus.............',
+      'LOL',
+      'You are in a maze of twisty little passages, all alike',
+      'I am a fish',
+      'potatos are actually vegetables did you know this, have you heard about this?'
+    ];
+
+    return messages[Math.floor(Math.random() * messages.length)];
   }
 }
