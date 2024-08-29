@@ -36,7 +36,7 @@ const defaultConfig: Partial<Config> = {
   workersTimeOut: 6e5,
 
   vmMemoryLimit: 32,
-  vmTimeout: 10000,
+  vmTimeout: 9000,
 
   maxChildProcessCount: os.availableParallelism(),
 }
@@ -117,17 +117,17 @@ export class Evaluator {
       return {
         statusCode: 200,
         duration: duration(),
-        data: [result],
+        data: [String(result)],
         errors: [],
       }
     } catch (e) {
-      console.error(e);
+      const message = e instanceof Error ? e.message : String(e);
 
       return {
         statusCode: 500,
         data: [],
         duration: duration(),
-        errors: [{ message: e.message || "Internal server error" }],
+        errors: [{ message: message || "Internal server error" }],
       }
     }
   }
