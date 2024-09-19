@@ -318,6 +318,12 @@ export class Evaluator {
   private dispatcherFactory(origin: string, options: Pool.Options) {
     const url = new URL(origin);
 
+    const ipv6adresss = url.hostname.match(/^\[(.*)\]$/);
+
+    if (ip.isV6Format(ipv6adresss?.[1])) {
+      this.throwIfPrivateIP(ipv6adresss?.[1]);
+    }
+
     if (ip.isV4Format(url.hostname) || ip.isV6Format(url.hostname)) {
       this.throwIfPrivateIP(url.hostname);
     }
