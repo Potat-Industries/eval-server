@@ -49,13 +49,47 @@ interface Waiter {
 }
 
 interface EvalPotatData {
-  user: Record<string, any> | undefined,
-  channel: Record<string, any> | undefined,
-  id: string,
-  timestamp: number,
-  platform: string,
-  isSilent: boolean,
+  parent?: EvalPotatData;
+  user: Record<string, any> | undefined;
+  channel: Record<string, any> | undefined;
+  id: string;
+  timestamp: number;
+  platform: string;
+  isSilent: boolean;
+  emotes: Array<MessageFragmentEmote>;
+  fragments: Array<MessageFragment>;
 };
+
+interface MessageFragment {
+  readonly text: string;
+  readonly flag?: string;
+  readonly value?: 'boolean' |
+     'string' |
+     'platform' |
+     'number' |
+     '+int' |
+     '-int' |
+     '+number' |
+     '-number' |
+     'regex';
+  readonly emote?: MessageFragmentEmote;
+  readonly mention?: Mention;
+  readonly link?: URL;
+  readonly translatable: boolean;
+}
+
+interface Mention {
+  readonly name: string;
+  readonly id: string;
+  readonly type: 'user' | 'role' | 'everyone' | 'here';
+}
+
+interface MessageFragmentEmote {
+  readonly id: string;
+  readonly name: string;
+  readonly alias?: string;
+  readonly url?: string;
+}
 
 export class Evaluator {
   private queue: Waiter[] = [];
@@ -155,6 +189,45 @@ export class Evaluator {
     this.processing = false;
   }
 
+  private filterMessage(msg: Record<string, any>): EvalPotatData | undefined {
+    delete msg?.channel?.commands;
+    delete msg?.command?.description;
+    delete msg?.channel?.blocks;
+
+    const potatData: EvalPotatData = {
+      user: msg?.user,
+      channel: msg?.channel,
+      id: `${msg?.id ?? ""}`,
+      timestamp: msg?.timestamp ?? Date.now(),
+      isSilent: !!msg?.command?.silent,
+      platform: msg?.platform ?? "PotatEval",
+      emotes: msg?.emotes ?? [],
+      fragments: msg?.fragments ?? [],
+    };
+
+    if (msg.parent) {
+      potatData.parent = this.filterMessage(msg.parent);
+    }
+
+    return potatData;
+  }
+
+  private makePotatDataHeaders(potatData: EvalPotatData | undefined, id=0): Record<string, any> | undefined {
+    if (!potatData) {
+      return;
+    }
+
+    const {parent, ...msg} = potatData;
+
+    const name = 'x-potat-data' + (id ? '-' + id : '');
+    const value = encodeURIComponent(JSON.stringify(msg));
+
+    return {
+      ...this.makePotatDataHeaders(parent, id + 1),
+      [name]: value
+    };
+  }
+
   private async eval(code: string, msg?: Record<string, any>): Promise<string> {
     return new Promise(async (resolve, reject) => {
       try {
@@ -176,14 +249,7 @@ export class Evaluator {
             delete msg?.command?.description;
             delete msg?.channel?.blocks;
 
-            const potatData: EvalPotatData = {
-              user: msg?.user,
-              channel: msg?.channel,
-              id: `${msg?.id ?? ""}`,
-              timestamp: msg?.timestamp ?? Date.now(),
-              isSilent: !!msg?.command?.silent,
-              platform: msg?.platform ?? "PotatEval",
-            };
+            const potatData = this.filterMessage(msg);
 
             const prelude = `
               'use strict';
@@ -263,7 +329,7 @@ export class Evaluator {
         headers: {
           ...options?.headers ?? {},
           'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/',
-          'x-potat-data': encodeURIComponent(JSON.stringify(potatData)),
+          ...this.makePotatDataHeaders(potatData),
         }
       })
 
