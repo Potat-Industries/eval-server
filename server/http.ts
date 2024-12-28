@@ -20,7 +20,9 @@ export class EvalServer extends EventEmitter {
     super();
 
     this.server = express();
-    this.server.use(json());
+    this.server.use(json({
+      limit: '20mb'
+    }));
     this.setupRoute();
   }
 
