@@ -6,7 +6,8 @@ import dns from "dns";
 import ip from 'ip';
 import { Utils } from "./sandbox-utils.js";
 import { EvalSocket, EvalResponse, EvalServer } from "./server";
-import { PotatWorker, PotatWorkersPool } from "./workers";
+import { PotatWorkersPool } from "./workers";
+import Logger from "./logger";
 
 const config = require('./config.json');
 
@@ -28,7 +29,7 @@ export interface Config {
 }
 
 const defaultConfig: Partial<Config> = {
-  fetchTimeout: 5000,
+  fetchTimeout: 15000,
   fetchMaxResponseLength: 10000,
   maxFetchConcurrency: 5,
   queueSize: 20,
@@ -36,7 +37,7 @@ const defaultConfig: Partial<Config> = {
   workersTimeOut: 6e5,
 
   vmMemoryLimit: 32,
-  vmTimeout: 9000,
+  vmTimeout: 14000,
 
   maxChildProcessCount: os.availableParallelism(),
 }
@@ -115,7 +116,7 @@ export class Evaluator {
     const httpServer = new EvalServer(this.config.auth, this.handleEvalRequests.bind(this));
 
     const server = httpServer.listen(this.config.port, () => {
-      console.log(`Server listening on port ${this.config.port}`);
+      Logger.debug(`Server listening on port ${this.config.port}`);
     });
 
     new EvalSocket(server, this.config.auth, this.handleEvalRequests.bind(this));
@@ -124,6 +125,10 @@ export class Evaluator {
   private async handleEvalRequests(code: string, msg: any): Promise<EvalResponse> {
     const start = performance.now();
     const duration = () => parseFloat((performance.now() - start).toFixed(4));
+
+    Logger.debug(
+      `Evaluating code: ${code.length > 30 ? code.slice(0, 30) + '...' : code}`,
+    );
 
     if (!code || typeof code !== "string") {
       return {
@@ -157,6 +162,7 @@ export class Evaluator {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
 
+      Logger.error(`Error evaluating code: ${message}`);
       return {
         statusCode: 500,
         data: [],
@@ -244,10 +250,6 @@ export class Evaluator {
             const jail = context.global;
 
             await jail.set("global", jail.derefInto());
-
-            delete msg?.channel?.commands;
-            delete msg?.command?.description;
-            delete msg?.channel?.blocks;
 
             const potatData = this.filterMessage(msg);
 
@@ -339,11 +341,13 @@ export class Evaluator {
     } catch (e) {
       // Promise aborted by timeout.
       if (e.constructor.name === 'DOMException') {
+        Logger.warn(`Evaluation request timed out: ${e.message}`);
         return new ExternalCopy({
           body: 'Request timed out.',
           status: 408
         }).copyInto();
       }
+      Logger.warn(`Evaluation api request failed: ${e.message}`);
       return new ExternalCopy({
         body: `Request failed - ${e.constructor.name}: ${e.cause ?? e.message}`,
         status: 400
@@ -409,9 +413,11 @@ export class Evaluator {
     catch { data = await blob.text(); }
     return data;
   }
-}
+}(config);
 
-new Evaluator({
+const configuration = {
   ...defaultConfig,
   ...config
-});
+} as Config;
+
+new Evaluator(configuration);

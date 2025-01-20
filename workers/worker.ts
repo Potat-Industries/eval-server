@@ -1,3 +1,4 @@
+import Logger from "../logger";
 import Cluster from "node:cluster";
 
 interface PotatWorkerRequest<T extends (...args: any) => any> {
@@ -153,21 +154,22 @@ export class PotatWorker<T extends (...args: any) => any> {
 
           abortController.signal.addEventListener('abort', () => {
             try {
+              Logger.warn('Worker is not responding. Killing...');
               reject(new Error('Worker is not responding.'));
               worker.kill('SIGKILL');
             } catch (e) {
-              console.error('Failed to kill worker', e);
+              Logger.error('Failed to kill worker', e);
             }
           })
         });
 
         this.requestsHandler = undefined;
       } catch (e) {
-        console.error('Worker died', e);
+        Logger.error('Worker died', e);
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.error('Forking new worker...');
+      Logger.error('Forking new worker...');
     }
   }
 }
