@@ -331,7 +331,7 @@ export class Evaluator {
         headers: {
           ...options?.headers ?? {},
           'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/',
-          ...this.makePotatDataHeaders(potatData),
+          ...(options?.withDataHeaders ? this.makePotatDataHeaders(potatData) : {}),
         }
       })
 
