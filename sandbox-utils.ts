@@ -28,6 +28,14 @@ export class Utils {
     return text;
   }
 
+  public atob(str: string): string {
+    return atob(str);
+  }
+
+  public btoa(str: string): string {
+    return btoa(str);
+  }
+
   public randomSlice(array: any[], size: number): any[] {
     return this.shuffleArray(array).slice(0, size);
   }
