@@ -2,6 +2,7 @@ import * as http from 'node:http';
 import { timingSafeEqual } from "node:crypto";
 import { WebSocketServer, WebSocket } from 'ws';
 import { EvalRequestHandler } from './types';
+import Logger from "../logger";
 
 enum EventCodes {
   RECIEVED_DATA = 4000,
@@ -42,10 +43,11 @@ export class EvalSocket {
       const token = url.searchParams.get('auth');
 
       if (!token || !this.validateToken(token)) {
-        console.error('Unauthorized socket connection.', token);
+        Logger.error('Unauthorized socket connection.', token);
         return client.close(EventCodes.UNAUTHORIZED, 'Unauthorized');
       }
 
+      Logger.debug('New socket connection established.');
       this.setupListeners(client);
     })
   }

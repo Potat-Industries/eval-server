@@ -131,6 +131,7 @@ export class Evaluator {
     );
 
     if (!code || typeof code !== "string") {
+      Logger.error(`Invalid code supplied: ${code}`);
       return {
         statusCode: 400,
         data: [],
@@ -142,6 +143,7 @@ export class Evaluator {
     }
 
     if (msg && typeof msg !== "object") {
+      Logger.error(`Invalid message supplied: ${msg}`);
       return {
         statusCode: 400,
         data: [],
@@ -258,7 +260,7 @@ export class Evaluator {
 
               function toString(value) {
                 if (typeof value === 'string') return value;
-                if (value instanceof Error) return value.constructor.name + ': ' + value.message;
+                if (value instanceof Error) return value.constructor.name.concat(': ', value.message);
                 if (value instanceof Promise) return value.then(toString);
                 if (Array.isArray(value)) return value.map(toString).join(', ');
                 return JSON.stringify(value);
