@@ -333,7 +333,7 @@ export class Evaluator {
         headers: {
           ...options?.headers ?? {},
           'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/',
-          ...(options?.withDataHeaders ? this.makePotatDataHeaders(potatData) : {}),
+          ...(options?.withDataHeaders || url.startsWith('https://fun.joet.me') ? this.makePotatDataHeaders(potatData) : {}),
         }
       })
 
