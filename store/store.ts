@@ -131,7 +131,8 @@ const get = async (
   
 const set = async (
   privateKey: string,
-  key: string, data: unknown,
+  key: string,
+  data: unknown,
   expirySeconds: number,
 ): Promise<unknown | undefined> => {
   const len = await redis.hlen(key);
@@ -164,9 +165,14 @@ const ex = async (
   return redis.hexpire(privateKey, expiry, key, mode);
 };
 
+const len = async (privateKey: string): Promise<number> => {
+  return redis.hlen(privateKey);
+}
+
 export const store = {
   get,
   set,
   del,
+  len,
   ex,
 }

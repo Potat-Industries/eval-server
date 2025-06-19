@@ -291,18 +291,6 @@ export class Evaluator {
               const msg = JSON.parse(${JSON.stringify(JSON.stringify(msg ?? {}))});
             `;
 
-            await context.evalClosure(`
-                global.fetch = (url, options) => $0.apply(undefined, [url, options], {
-                  arguments: { copy: true },
-                  promise: true,
-                  result: { copy: true, promise: true }
-                });
-
-                Object.freeze(global.fetch);
-              `,
-              [new Reference(this.fetchImplement.bind(this, potatData))],
-            );
-
             await context.evalClosure(
               `
               const __getKey = (flags, msg) => {
@@ -339,16 +327,26 @@ export class Evaluator {
                 get: (key, flag) => $0.apply(
                   undefined, 
                   [__getKey(flag, $3), key], 
-                  { result: { promise: true } }
+                  { result: { promise: true, copy: true } }
                 ),
-                set: (key, data, ex, flag) => $1.apply(
+                set: (key, data, flag, ex) => $1.apply(
                   undefined, 
                   [__getKey(flag, $3), key, typeof data === 'object' ? JSON.stringify(data) : data, ex], 
-                  { result: { promise: true } }
+                  { result: { promise: true, copy: true } }
                 ),
                 del: (key, flag) => $2.apply(
                   undefined, 
                   [__getKey(flag, $3), key], 
+                  { result: { promise: true } }
+                ),
+                len: (key, flag) => $6.apply(
+                  undefined,
+                  [__getKey(flag, $3), key], 
+                  { result: { promise: true } }
+                ),
+                ex: (key, seconds, flag) => $5.apply(
+                  undefined,
+                  [__getKey(flag, $3), key, seconds],
                   { result: { promise: true } }
                 ),
               };
@@ -357,11 +355,20 @@ export class Evaluator {
               store.g = store.get;
               store.s = store.set;
               store.d = store.del;
+              store.l = store.len;
               global.s = store;
               global.p = permissions;
 
               Object.freeze(global.store);
               Object.freeze(global.p);
+
+              global.fetch = (url, options) => $5.apply(undefined, [url, options], {
+                arguments: { copy: true },
+                promise: true,
+                result: { copy: true, promise: true }
+              });
+
+              Object.freeze(global.fetch);
               `,
               [
                 new Reference(store.get),
@@ -369,6 +376,9 @@ export class Evaluator {
                 new Reference(store.del), 
                 new ExternalCopy(msg).copyInto(),
                 new ExternalCopy(permissions).copyInto(),
+                new Reference(this.fetchImplement.bind(this, potatData)),
+                new Reference(store.len),
+                new Reference(store.ex),
               ],
             );
 
