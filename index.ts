@@ -7,7 +7,8 @@ import ip from 'ip';
 import { Utils } from "./sandbox-utils.js";
 import { EvalSocket, EvalResponse, EvalServer } from "./server";
 import { PotatWorkersPool } from "./workers";
-import Logger from "./logger";
+import Logger from "./logger.js";
+import { store } from "./store/store.js";
 
 const config = require('./config.json');
 
@@ -26,6 +27,9 @@ export interface Config {
   vmTimeout: number;
 
   maxChildProcessCount: number;
+
+  redisHost: string;
+  redisPort: number;
 }
 
 const defaultConfig: Partial<Config> = {
@@ -255,28 +259,119 @@ export class Evaluator {
 
             const potatData = this.filterMessage(msg);
 
+            const permissions = {
+              command: 1 << 1,
+              c: 1 << 1,
+              user: 1 << 2,
+              u: 1 << 2,
+              channel: 1 << 3,
+              ch: 1 << 3,
+            };
+
+            await jail.set("permissions", new ExternalCopy(permissions).copyInto());
+
             const prelude = `
               'use strict';
 
-              function toString(value) {
-                if (typeof value === 'string') return value;
-                if (value instanceof Error) return value.constructor.name.concat(': ', value.message);
-                if (value instanceof Promise) return value.then(toString);
-                if (Array.isArray(value)) return value.map(toString).join(', ');
-                return JSON.stringify(value);
-              }
+              const toString = (value) => {
+                if (typeof value === 'string') {
+                  return value;
+                }
+                if (value instanceof Error) {
+                  return value.constructor.name.concat(': ', value.message);
+                }
+                if (value instanceof Promise) {
+                  return value.then(toString);
+                }
+                if (Array.isArray(value)) {
+                  return value.map(toString).join(', ');
+                }
 
-              let msg = JSON.parse(${JSON.stringify(JSON.stringify(msg ?? {}))});
+                return JSON.stringify(value);
+              };
+
+              const msg = JSON.parse(${JSON.stringify(JSON.stringify(msg ?? {}))});
             `;
 
             await context.evalClosure(`
-              global.fetch = (url, options) => $0.apply(undefined, [url, options], {
+                global.fetch = (url, options) => $0.apply(undefined, [url, options], {
                   arguments: { copy: true },
                   promise: true,
                   result: { copy: true, promise: true }
-                })
+                });
+
+                Object.freeze(global.fetch);
               `,
               [new Reference(this.fetchImplement.bind(this, potatData))],
+            );
+
+            await context.evalClosure(
+              `
+              const __getKey = (flags, msg) => {
+                if (!flags || typeof flags !== 'number') {
+                  return \`user:\${msg.user.id}:channel:\${msg.channel.id}\`;
+                }
+                
+                const segments = [];
+                if (flags & $4.user) {
+                  if (!msg.user.id) {
+                    throw new Error("userID is required for user scope");
+                  }
+                  segments.push('user', msg.user.id);
+                }
+
+                if (flags & $4.command) {
+                  if (!msg.command.id) {
+                    throw new Error("commandID is required for command scope");
+                  }
+                  segments.push('command', msg.command.id);
+                }
+
+                if (flags & $4.channel) {
+                  if (!msg.channel.id) {
+                    throw new Error("channelID is required for channel scope");
+                  }
+                  segments.push('channel', msg.channel.id);
+                }
+
+                return segments.join(':');
+              }
+
+              global.store = {
+                get: (key, flag) => $0.apply(
+                  undefined, 
+                  [__getKey(flag, $3), key], 
+                  { result: { promise: true } }
+                ),
+                set: (key, data, ex, flag) => $1.apply(
+                  undefined, 
+                  [__getKey(flag, $3), key, data], 
+                  { result: { promise: true } }
+                ),
+                del: (key, flag) => $2.apply(
+                  undefined, 
+                  [__getKey(flag, $3), key], 
+                  { result: { promise: true } }
+                ),
+              };
+            
+              // Aliases
+              store.g = store.get;
+              store.s = store.set;
+              store.d = store.del;
+              global.s = store;
+              global.p = permissions;
+
+              Object.freeze(global.store);
+              Object.freeze(global.p);
+              `,
+              [
+                new Reference(store.get), 
+                new Reference(store.set),
+                new Reference(store.del), 
+                new ExternalCopy(msg).copyInto(),
+                new ExternalCopy(permissions).copyInto(),
+              ],
             );
 
             await Utils.inject(jail);
@@ -298,7 +393,10 @@ export class Evaluator {
 
             return context.eval(code, { timeout: this.config.vmTimeout + 1e3, promise: true });
           })
-          .catch((e) => { return '🚫 ' + e.constructor.name + ': ' + e.message; })
+          .catch((e) => { 
+            Logger.error(`Error evaluating code: ${e.stack}`);
+            return '🚫 ' + e.constructor.name + ': ' + e.message; 
+          })
           .finally(() => isolate.dispose());
 
         this.concurrencyCounter = 0;

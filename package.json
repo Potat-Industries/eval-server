@@ -4,7 +4,7 @@
   "description": "simple server to run a vm for javascript evaluation",
   "main": "index.js",
   "scripts": {
-    "start": "tsc && node index.js",
+    "start": "docker-compose up -d && tsc && node index.js",
     "build": "tsc"
   },
   "author": "RyanPotat",
@@ -12,6 +12,7 @@
   "dependencies": {
     "chalk": "^4.1.2",
     "express": "^4.19.2",
+    "ioredis": "^5.6.1",
     "ip": "^2.0.1",
     "isolated-vm": "^4.7.2",
     "moment-timezone": "^0.5.46",

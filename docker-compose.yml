@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:latest
+    restart: always
+    ports:
+      - '6777:6379'
+    volumes:
+      - "eval_store:/data"
+
+volumes:
+  eval_store:
