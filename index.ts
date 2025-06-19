@@ -242,176 +242,174 @@ export class Evaluator {
 
   private async eval(code: string, msg?: Record<string, any>): Promise<string> {
     return new Promise(async (resolve, reject) => {
+      const isolate = new Isolate({
+        memoryLimit: 8,
+        onCatastrophicError: (e) => reject(e),
+      });
+
       try {
-        const isolate = new Isolate({
-          memoryLimit: 8,
-          onCatastrophicError: (e) => reject(e),
-        });
+        const context = await isolate.createContext();
+        const jail = context.global;
 
-        const result = await isolate
-          .createContext()
-          .then(async (context) => {
-            const jail = context.global;
+        await jail.set("global", jail.derefInto());
 
-            await jail.set("global", jail.derefInto());
+        const potatData = this.filterMessage(msg);
 
-            const potatData = this.filterMessage(msg);
+        const permissions = {
+          command: 1 << 1,
+          c: 1 << 1,
+          user: 1 << 2,
+          u: 1 << 2,
+          channel: 1 << 3,
+          ch: 1 << 3,
+        };
 
-            const permissions = {
-              command: 1 << 1,
-              c: 1 << 1,
-              user: 1 << 2,
-              u: 1 << 2,
-              channel: 1 << 3,
-              ch: 1 << 3,
-            };
+        await jail.set("permissions", new ExternalCopy(permissions).copyInto());
 
-            await jail.set("permissions", new ExternalCopy(permissions).copyInto());
+        const prelude = `
+          'use strict';
 
-            const prelude = `
-              'use strict';
-
-              const toString = (value) => {
-                if (typeof value === 'string') {
-                  return value;
-                }
-                if (value instanceof Error) {
-                  return value.constructor.name.concat(': ', value.message);
-                }
-                if (value instanceof Promise) {
-                  return value.then(toString);
-                }
-                if (Array.isArray(value)) {
-                  return value.map(toString).join(', ');
-                }
-
-                return JSON.stringify(value);
-              };
-
-              const msg = JSON.parse(${JSON.stringify(JSON.stringify(msg ?? {}))});
-            `;
-
-            await context.evalClosure(
-              `
-              const __getKey = (flags, msg) => {
-                if (!flags || typeof flags !== 'number') {
-                  return \`user:\${msg.user.id}:channel:\${msg.channel.id}\`;
-                }
-                
-                const segments = [];
-                if (flags & $4.user) {
-                  if (!msg.user.id) {
-                    throw new Error("userID is required for user scope");
-                  }
-                  segments.push('user', msg.user.id);
-                }
-
-                if (flags & $4.command) {
-                  if (!msg.command.id) {
-                    throw new Error("commandID is required for command scope");
-                  }
-                  segments.push('command', msg.command.id);
-                }
-
-                if (flags & $4.channel) {
-                  if (!msg.channel.id) {
-                    throw new Error("channelID is required for channel scope");
-                  }
-                  segments.push('channel', msg.channel.id);
-                }
-
-                return segments.join(':');
-              }
-
-              global.store = {
-                get: (key, flag) => $0.apply(
-                  undefined, 
-                  [__getKey(flag, $3), key], 
-                  { result: { promise: true, copy: true } }
-                ),
-                set: (key, data, flag, ex) => $1.apply(
-                  undefined, 
-                  [__getKey(flag, $3), key, typeof data === 'object' ? JSON.stringify(data) : data, ex], 
-                  { result: { promise: true, copy: true } }
-                ),
-                del: (key, flag) => $2.apply(
-                  undefined, 
-                  [__getKey(flag, $3), key], 
-                  { result: { promise: true } }
-                ),
-                len: (key, flag) => $6.apply(
-                  undefined,
-                  [__getKey(flag, $3), key], 
-                  { result: { promise: true } }
-                ),
-                ex: (key, seconds, flag) => $5.apply(
-                  undefined,
-                  [__getKey(flag, $3), key, seconds],
-                  { result: { promise: true } }
-                ),
-              };
-            
-              // Aliases
-              store.g = store.get;
-              store.s = store.set;
-              store.d = store.del;
-              store.l = store.len;
-              global.s = store;
-              global.p = permissions;
-
-              Object.freeze(global.store);
-              Object.freeze(global.p);
-
-              global.fetch = (url, options) => $5.apply(undefined, [url, options], {
-                arguments: { copy: true },
-                promise: true,
-                result: { copy: true, promise: true }
-              });
-
-              Object.freeze(global.fetch);
-              `,
-              [
-                new Reference(store.get),
-                new Reference(store.set),
-                new Reference(store.del), 
-                new ExternalCopy(msg).copyInto(),
-                new ExternalCopy(permissions).copyInto(),
-                new Reference(this.fetchImplement.bind(this, potatData)),
-                new Reference(store.len),
-                new Reference(store.ex),
-              ],
-            );
-
-            await Utils.inject(jail);
-
-            if (/return|await/.test(code)) {
-              code = prelude + `toString((async function evaluate() { ${code} })());`;
-
-              await context.evalClosure(
-                `
-                evaluate = function() {
-                  return $0.apply(undefined, [], { result: { promise: true } })
-                }`,
-                [],
-                { arguments: { reference: true } }
-              );
-            } else {
-              code = prelude + `toString(eval('${code?.replace(/[\\"']/g, "\\$&")}'))`;
+          const toString = (value) => {
+            if (typeof value === 'string') {
+              return value;
+            }
+            if (value instanceof Error) {
+              return value.constructor.name.concat(': ', value.message);
+            }
+            if (value instanceof Promise) {
+              return value.then(toString);
+            }
+            if (Array.isArray(value)) {
+              return value.map(toString).join(', ');
             }
 
-            return context.eval(code, { timeout: this.config.vmTimeout + 1e3, promise: true });
-          })
-          .catch((e) => { 
-            Logger.error(`Error evaluating code: ${e.stack}`);
-            return '🚫 ' + e.constructor.name + ': ' + e.message; 
-          })
-          .finally(() => isolate.dispose());
+            return JSON.stringify(value);
+          };
+
+          const msg = JSON.parse(${JSON.stringify(JSON.stringify(msg ?? {}))});
+        `;
+
+        await context.evalClosure(
+          `
+          const __getKey = (flags, msg) => {
+            if (!flags || typeof flags !== 'number') {
+              return \`user:\${msg.user.id}:channel:\${msg.channel.id}\`;
+            }
+            
+            const segments = [];
+            if (flags & $4.user) {
+              if (!msg.user.id) {
+                throw new Error("userID is required for user scope");
+              }
+              segments.push('user', msg.user.id);
+            }
+
+            if (flags & $4.command) {
+              if (!msg.command.id) {
+                throw new Error("commandID is required for command scope");
+              }
+              segments.push('command', msg.command.id);
+            }
+
+            if (flags & $4.channel) {
+              if (!msg.channel.id) {
+                throw new Error("channelID is required for channel scope");
+              }
+              segments.push('channel', msg.channel.id);
+            }
+
+            return segments.join(':');
+          }
+
+          global.store = {
+            get: (key, flag) => $0.apply(
+              undefined, 
+              [__getKey(flag, $3), key], 
+              { result: { promise: true, copy: true } }
+            ),
+            set: (key, data, flag, ex) => $1.apply(
+              undefined, 
+              [__getKey(flag, $3), key, typeof data === 'object' ? JSON.stringify(data) : data, ex], 
+              { result: { promise: true, copy: true } }
+            ),
+            del: (key, flag) => $2.apply(
+              undefined, 
+              [__getKey(flag, $3), key], 
+              { result: { promise: true } }
+            ),
+            len: (key, flag) => $6.apply(
+              undefined,
+              [__getKey(flag, $3), key], 
+              { result: { promise: true } }
+            ),
+            ex: (key, seconds, flag) => $5.apply(
+              undefined,
+              [__getKey(flag, $3), key, seconds],
+              { result: { promise: true } }
+            ),
+          };
+        
+          // Aliases
+          store.g = store.get;
+          store.s = store.set;
+          store.d = store.del;
+          store.l = store.len;
+          global.s = store;
+          global.p = permissions;
+
+          Object.freeze(global.store);
+          Object.freeze(global.p);
+
+          global.fetch = (url, options) => $5.apply(undefined, [url, options], {
+            arguments: { copy: true },
+            promise: true,
+            result: { copy: true, promise: true }
+          });
+
+          Object.freeze(global.fetch);
+          `,
+          [
+            new Reference(store.get),
+            new Reference(store.set),
+            new Reference(store.del), 
+            new ExternalCopy(msg).copyInto(),
+            new ExternalCopy(permissions).copyInto(),
+            new Reference(this.fetchImplement.bind(this, potatData)),
+            new Reference(store.len),
+            new Reference(store.ex),
+          ],
+        );
+
+        await Utils.inject(jail);
+
+        if (/return|await/.test(code)) {
+          code = prelude + `toString((async function evaluate() { ${code} })());`;
+
+          await context.evalClosure(
+            `
+            evaluate = function() {
+              return $0.apply(undefined, [], { result: { promise: true } })
+            }`,
+            [],
+            { arguments: { reference: true } }
+          );
+        } else {
+          code = prelude + `toString(eval('${code?.replace(/[\\"']/g, "\\$&")}'))`;
+        }
+
+        const result = await context.eval(code, { 
+          timeout: this.config.vmTimeout + 1e3, 
+          promise: true
+        });
 
         this.concurrencyCounter = 0;
 
         resolve((result ?? null)?.slice(0, this.config.fetchMaxResponseLength));
       } catch (e) {
-        reject(e);
+        Logger.error(`Error evaluating code: ${e.stack}`);
+        resolve('🚫 ' + e.constructor.name + ': ' + e.message);
+      } finally {
+        isolate.dispose();
       }
     });
   }
