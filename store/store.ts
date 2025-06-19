@@ -29,22 +29,33 @@ class PotatStore {
   }
 
   public async hset(
-    key: string | Buffer,
-    ...args: unknown[]
+    primaryKey: string,
+    key: string,
+    value: unknown,
   ): Promise<number> {
-    const stringifiedArgs = [];
-
-    for (const arg of args) {
-      if (typeof arg === 'string') {
-        stringifiedArgs.push(arg);
-
-        continue;
+    const validateData = (data: unknown): boolean => {
+      if (typeof data === 'string') {
+        return data.length <= 10000;
+      } else if (typeof data === 'number') {
+        return data.toString().length <= 10000;
+      } else if (typeof data === 'boolean') {
+        return data.toString().length <= 10000;
+      } else if (typeof data === 'object') {
+        return JSON.stringify(data).length <= 10000;
+      } else {
+        return false;
       }
-
-      stringifiedArgs.push(JSON.stringify(arg));
+    }
+    if (!validateData(value)) {
+      throw new Error(`Invalid data type: ${typeof value}`);
     }
 
-    return this.#client.hset(key, ...stringifiedArgs);
+    const data = typeof value === 'object' ? JSON.stringify(value) : value.toString();
+    if (data.length > 10000) {
+      throw new Error('Data too large to store in Redis');
+    }
+
+    return this.#client.hset(primaryKey, key, data);
   }
 
   public async hdel(key: string | Buffer, ...fields: string[]): Promise<number> {
@@ -52,21 +63,20 @@ class PotatStore {
   }
 
   public async hmget<T = unknown>(
-    key: string | Buffer,
-    ...args: any[]
-  ): Promise<T[]> {
-    const data = await this.#client.hmget(key, ...args);
-    return data.map((d) => {
-      if (!d) {
-        return null;
-      }
+    primaryKey: string,
+    key: string,
+  ): Promise<T | undefined> {
+    const data = await this.#client.hmget(primaryKey, key);
+    
+    if (!data[0]){
+      return;
+    }
 
-      try {
-        return JSON.parse(d as string)
-      } catch {
-        return d;
-      }
-    }).filter(t => t);
+    try {
+      return JSON.parse(data[0]);
+    } catch {
+      return data[0] as T;
+    }
   }
 
   public async hgetall<T = unknown>(key: string | Buffer): Promise<Map<string, T>> {
@@ -96,20 +106,13 @@ class PotatStore {
     return this.#client.hlen(key);
   }
 
-  public async hexpire(key: string | Buffer, seconds: number, field: string): Promise<unknown> {
-    return this.#client.eval(
-      `
-        local key = KEYS[1]
-        local seconds = ARGV[1]
-        local field = ARGV[2]
-        local result = redis.call('HEXPIRE', key, seconds, field)
-        return result
-      `,
-      2,
-      key,
-      seconds,
-      field,
-    )
+  public async hexpire(
+    key: string | Buffer,
+    seconds: number,
+    field: string,
+    mode: 'NX' | 'XX' | 'GT' | 'LT' = 'NX',
+  ): Promise<unknown> {
+    return this.#client.call('HEXPIRE', key, seconds, mode, 'FIELDS', 1, field);
   }
 }
 
@@ -122,17 +125,14 @@ const get = async (
   key: string,
 ): Promise<unknown | undefined> => {
   const user = await redis.hmget(privateKey, key);
-  if (!user[0]) {
-    return undefined;
-  }
 
-  return user[0];
+  return user ?? undefined;
 };
   
 const set = async (
   privateKey: string,
   key: string, data: unknown,
-  expiry: number,
+  expirySeconds: number,
 ): Promise<unknown | undefined> => {
   const len = await redis.hlen(key);
   if (len > MAX_KEYS) {
@@ -141,8 +141,8 @@ const set = async (
 
   await redis.hset(privateKey, key, data);
 
-  if (expiry > 0) {
-    ex(privateKey, key, expiry);
+  if (expirySeconds > 0) {
+    await ex(privateKey, key, expirySeconds);
   }
 
   return get(privateKey, key);
@@ -159,8 +159,9 @@ const ex = async (
   privateKey: string,
   key: string,
   expiry: number,
+  mode: 'NX' | 'XX' | 'GT' | 'LT' = 'NX',
 ): Promise<unknown | undefined> => {
-  return redis.hexpire(privateKey, expiry, key);
+  return redis.hexpire(privateKey, expiry, key, mode);
 };
 
 export const store = {

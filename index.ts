@@ -245,9 +245,7 @@ export class Evaluator {
       try {
         const isolate = new Isolate({
           memoryLimit: 8,
-          onCatastrophicError: (e) => {
-            reject(e);
-          }
+          onCatastrophicError: (e) => reject(e),
         });
 
         const result = await isolate
@@ -345,7 +343,7 @@ export class Evaluator {
                 ),
                 set: (key, data, ex, flag) => $1.apply(
                   undefined, 
-                  [__getKey(flag, $3), key, data], 
+                  [__getKey(flag, $3), key, typeof data === 'object' ? JSON.stringify(data) : data, ex], 
                   { result: { promise: true } }
                 ),
                 del: (key, flag) => $2.apply(
@@ -366,7 +364,7 @@ export class Evaluator {
               Object.freeze(global.p);
               `,
               [
-                new Reference(store.get), 
+                new Reference(store.get),
                 new Reference(store.set),
                 new Reference(store.del), 
                 new ExternalCopy(msg).copyInto(),
