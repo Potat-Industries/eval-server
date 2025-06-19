@@ -96,19 +96,19 @@ class PotatStore {
     return this.#client.hlen(key);
   }
 
-  public async hexpire(key: string | Buffer, seconds: number, feild: string): Promise<unknown> {
+  public async hexpire(key: string | Buffer, seconds: number, field: string): Promise<unknown> {
     return this.#client.eval(
       `
         local key = KEYS[1]
         local seconds = ARGV[1]
-        local feild = ARGV[2]
-        local result = redis.call('HEXPIRE', key, seconds, feild)
+        local field = ARGV[2]
+        local result = redis.call('HEXPIRE', key, seconds, field)
         return result
       `,
       2,
       key,
       seconds,
-      feild,
+      field,
     )
   }
 }
