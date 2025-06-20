@@ -435,7 +435,7 @@ export class Evaluator {
           if ($8) {
             global.command = (name, ...args) => $8.apply(
               undefined,
-              [name, ...args],
+              [$3, name, ...args],
               { arguments: { copy: true }, result: { promise: true, copy: true } }
             );
             global.c = global.command;
