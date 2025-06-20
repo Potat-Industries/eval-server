@@ -14,6 +14,27 @@ interface PotatWorkerResponse<T extends (...args: any)=> any> {
   id: number;
 }
 
+interface PotatCommandRequest {
+  type: 'PotatCommandRequest';
+  commandName: string;
+  args: any[];
+  msg: Record<string, any>;
+  id: number;
+}
+
+interface PotatCommandResponse {
+  type: 'PotatCommandResponse';
+  id: number;
+  result?: any;
+  error?: Error | string;
+}
+
+type PotatWorkerMessage<T  extends (...args: any)=> any> = 
+  | PotatWorkerRequest<T>
+  | PotatWorkerResponse<T>
+  | PotatCommandRequest 
+  | PotatCommandResponse;
+
 type PotatRequestHandlerCallback<T extends (...args: any) => any> = (error: Error | undefined, m?: ReturnType<T> | undefined) => void;
 
 export class PotatWorker<T extends (...args: any) => any> {
@@ -21,6 +42,10 @@ export class PotatWorker<T extends (...args: any) => any> {
     args: Parameters<T>,
     callback: PotatRequestHandlerCallback<T>
   ) => void) | undefined;
+
+  private readonly workerHandler: T;
+  private readonly workerTimeOut: number;
+  private readonly workerExecutionTimeout: number;
 
   private id = 0;
 
@@ -34,7 +59,15 @@ export class PotatWorker<T extends (...args: any) => any> {
     return this.queueSizeValue?.value ?? 0;
   }
 
-  constructor(private readonly workerHandler: T, private readonly workerTimeOut: number, private readonly workerExecutionTimeout: number) {
+  constructor(
+    workerHandler: T,
+    workerTimeOut: number, 
+    workerExecutionTimeout: number) {
+
+    this.workerHandler = workerHandler;
+    this.workerTimeOut = workerTimeOut;
+    this.workerExecutionTimeout = workerExecutionTimeout;
+
     if (Cluster.isPrimary) {
       this.keepWorkerAlive();
     } else {
@@ -44,7 +77,7 @@ export class PotatWorker<T extends (...args: any) => any> {
     this.add = this.add.bind(this);
   }
 
-  public add(...args: Parameters<T>): Promise<ReturnType<T>> {
+  public async add(...args: Parameters<T>): Promise<ReturnType<T>> {
     if (Cluster.isWorker) {
       return this.workerHandler(...args);
     }
@@ -79,23 +112,66 @@ export class PotatWorker<T extends (...args: any) => any> {
   }
 
   private worker() {
-    process.addListener('message', async (m: PotatWorkerRequest<T>) => {
-      if (m.type === 'PotatWorkerRequest') {
-        try {
-          const result = await this.workerHandler(...(m.args ?? []));
+    process.addListener('message', async (m: PotatWorkerMessage<T>) => {
+      switch(m.type) {
+        case 'PotatWorkerRequest':
+          try {
+            const result = await this.workerHandler(...(m.args ?? []));
+  
+            process.send({
+              type: 'PotatWorkerResponse',
+              id: m.id,
+              result,
+            });
+          } catch (error) {
+            process.send({
+              type: 'PotatWorkerResponse',
+              id: m.id,
+              error,
+            });
+          }
 
-          process.send({
-            type: 'PotatWorkerResponse',
-            id: m.id,
-            result,
-          });
-        } catch (error) {
-          process.send({
-            type: 'PotatWorkerResponse',
-            id: m.id,
-            error,
-          });
-        }
+          break;
+          case 'PotatCommandRequest':
+            console.log('Received command request', m.commandName, m.args, m.msg);
+            try {
+              process.send({
+                type: 'PotatCommandRequest',
+                commandName: m.commandName,
+                args: m.args,
+                msg: m.msg,
+                id: m.id,
+              });
+          
+              const responseHandler = (res: any) => {
+                if (res.type === 'PotatCommandResponse' && res.id === m.id) {
+                  process.removeListener('message', responseHandler);
+          
+                  process.send({
+                    type: 'PotatWorkerResponse',
+                    id: res.id,
+                    result: res.result,
+                    error: res.error,
+                  });
+                }
+              };
+          
+              process.addListener('message', responseHandler);
+            } catch (error) {
+              process.send({
+                type: 'PotatWorkerResponse',
+                id: m.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            break;
+          case 'PotatWorkerResponse':
+          case 'PotatCommandResponse':
+            // This is a response from the worker or command handler
+            break;
+        default:
+          const message = typeof m === 'object' ? JSON.stringify(m) : String(m);
+          Logger.error('Unknown worker message type', message);
       }
     });
   }

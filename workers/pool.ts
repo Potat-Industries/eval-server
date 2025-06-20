@@ -37,8 +37,8 @@ export class PotatWorkersPool<T extends (...args: any) => any> {
 
   private pickWorker() {
     const worker = this.workers
-    .filter(w => w.isReady && w.queueSize < this.settings.maxQueueSizePerWorker)
-    .sort((a, b) => a.queueSize - b.queueSize)[0];
+      .filter(w => w.isReady && w.queueSize < this.settings.maxQueueSizePerWorker)
+      .sort((a, b) => a.queueSize - b.queueSize)[0];
 
     if (!worker) {
       throw new Error("The queue is full.");

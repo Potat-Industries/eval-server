@@ -18,7 +18,7 @@ enum EventCodes {
 interface EvalMessage {
   code: string;
   msg?: string;
-  id: number;
+  id: string;
 }
 
 interface EvalWebSocket extends WebSocket {
@@ -27,6 +27,11 @@ interface EvalWebSocket extends WebSocket {
 
 export class EvalSocket {
   private ws: WebSocketServer;
+
+  private awaiters: Map<string, { 
+    resolve: (value: unknown) => void; 
+    timeout: NodeJS.Timeout;
+  }> = new Map();
 
   public constructor(
     server: http.Server,
@@ -64,6 +69,14 @@ export class EvalSocket {
         );
       }
 
+      const awaiter = this.awaiters.get(data.id);
+      if (awaiter) {
+        clearTimeout(awaiter.timeout);
+        this.awaiters.delete(data.id);
+        
+        return awaiter.resolve(data);
+      }
+
       const response = await this.handleEvalRequest(data.code, data.msg);
       this.send(client, {
         ...response,
@@ -87,14 +100,44 @@ export class EvalSocket {
     }, 30_000);
   }
 
-  private send(client: EvalWebSocket, data: any, op: EventCodes): void {
+  public runCommand(
+    commandName: string,
+    msg: Record<string, any>, 
+    args: string[],
+  ): Promise<unknown> {
+    if (args.length && args.some(arg => typeof arg !== 'string')) {
+      throw new TypeError('Command arguments must be strings!');
+    }
+
+    const id = crypto.randomUUID();
+
+    const data = {
+      code: commandName,
+      msg: msg,
+      id
+    };
+
+    return new Promise((resolve, reject) => {
+      for (const client of this.ws.clients) {
+        this.send(
+          client as EvalWebSocket,
+          data,
+          EventCodes.DISPATCH
+        );
+      }
+
+      const timeout = setTimeout(() => {
+        this.awaiters.delete(id);
+        reject(new Error('Command timed out.'));
+      }, 10_000);
+
+      this.awaiters.set(id, { resolve, timeout });
+    });
+  }
+
+  private send(client: EvalWebSocket, data: any, op: EventCodes = EventCodes.DISPATCH): void {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(
-        JSON.stringify({
-          opcode: op ?? EventCodes.DISPATCH,
-          data
-        })
-      );
+      client.send(JSON.stringify({ opcode: op, data }));
     }
   }
 
@@ -114,7 +157,8 @@ export class EvalSocket {
       'LOL',
       'You are in a maze of twisty little passages, all alike',
       'I am a fish',
-      'potatos are actually vegetables did you know this, have you heard about this?'
+      'potatos are actually vegetables did you know this, have you heard about this?',
+      'hamburger',
     ];
 
     return messages[Math.floor(Math.random() * messages.length)];

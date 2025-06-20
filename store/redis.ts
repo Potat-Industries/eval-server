@@ -28,8 +28,6 @@ class PotatStore {
   }
 
   public constructor() {    
-    Logger.debug('Connecting to Redis...');
-
     this.#client = new Redis({
       host: config.redisHost ?? 'localhost',
       port: config.redisPort ?? 6777,

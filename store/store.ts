@@ -6,6 +6,9 @@ const get = async (
   privateKey: string,
   key: string,
 ): Promise<unknown | undefined> => {
+  if (!redis.ready) {
+    throw new Error('Redis store is not initialized');
+  }
   const user = await redis.hmget(privateKey, key);
 
   return user ?? undefined;
@@ -17,6 +20,10 @@ const set = async (
   data: unknown,
   expirySeconds: number,
 ): Promise<unknown | undefined> => {
+  if (!redis.ready) {
+    throw new Error('Redis store is not initialized');
+  }
+
   const len = await redis.hlen(key);
   if (len > MAX_KEYS) {
     throw new Error(`Too many keys in store: ${key}`);
@@ -35,6 +42,10 @@ const del = async (
   privateKey: string,
   key: string,
 ): Promise<unknown | undefined> => {
+  if (!redis.ready) {
+    throw new Error('Redis store is not initialized');
+  }
+
   return redis.hdel(privateKey, key);
 }
 
@@ -44,10 +55,18 @@ const ex = async (
   expiry: number,
   mode: 'NX' | 'XX' | 'GT' | 'LT' = 'NX',
 ): Promise<unknown | undefined> => {
+  if (!redis.ready) {
+    throw new Error('Redis store is not initialized');
+  }
+
   return redis.hexpire(privateKey, expiry, key, mode);
 };
 
 const len = async (privateKey: string): Promise<number> => {
+  if (!redis.ready) {
+    throw new Error('Redis store is not initialized');
+  }
+
   return redis.hlen(privateKey);
 }
 

@@ -97,20 +97,48 @@ interface MessageFragmentEmote {
 }
 
 export class Evaluator {
+  private socket: EvalSocket | undefined;
   private queue: Waiter[] = [];
   private processing: boolean = false;
   private concurrencyCounter: number = 0;
-
+  
   private readonly pool: PotatWorkersPool<typeof this.add>;
+  private readonly config: Config;
 
-  public constructor(private readonly config: Config) {
+  public constructor(config: Config) {
+    this.config = config;
+
     if (Cluster.isPrimary) {
       this.startServer();
+
+      Cluster.on('message', async (worker, message: any) => {
+        if (message.type === 'PotatCommandRequest') {
+          try {
+            const result = await this.socket?.runCommand?.(
+              message.commandName,
+              message.msg,
+              message.args
+            );
+    
+            worker.send({
+              type: 'PotatCommandResponse',
+              id: message.id,
+              result,
+            });
+          } catch (error: any) {
+            worker.send({
+              type: 'PotatCommandResponse',
+              id: message.id,
+              error: error?.message ?? String(error),
+            });
+          }
+        }
+      });
     }
-
-    this.pool = new PotatWorkersPool(this.add.bind(this), Math.max(1, config.maxChildProcessCount), {
+    
+    const size = Math.max(1, this.config.maxChildProcessCount);
+    this.pool = new PotatWorkersPool(this.add.bind(this), size, {
       maxQueueSizePerWorker: this.config.queueSize,
-
       workerTimeOut: this.config.workersTimeOut,
       workerExecutionTimeout: this.config.vmTimeout,
     });
@@ -123,7 +151,7 @@ export class Evaluator {
       Logger.debug(`Server listening on port ${this.config.port}`);
     });
 
-    new EvalSocket(server, this.config.auth, this.handleEvalRequests.bind(this));
+    this.socket = new EvalSocket(server, this.config.auth, this.handleEvalRequests.bind(this));
   }
 
   private async handleEvalRequests(code: string, msg: any): Promise<EvalResponse> {
@@ -186,13 +214,17 @@ export class Evaluator {
   }
 
   private async process() {
-    if (this.processing) return;
+    if (this.processing) {
+      return;
+    }
 
     this.processing = true;
 
     while (this.queue.length) {
       const next = this.queue.shift();
-      if (!next) continue;
+      if (!next) {
+        continue;
+      }
 
       const { code, msg, resolve, reject } = next as Waiter;
       await this.eval(code, msg).then(resolve).catch(reject);
@@ -239,6 +271,38 @@ export class Evaluator {
       [name]: value
     };
   }
+
+  private async runCommand(
+    msg: Record<string, any>,
+    commandName: string, 
+    ...args: any[]
+  ): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const id = Math.random().toString(36).slice(2);
+
+      const listener = (msg: any) => {
+        if (msg.type === 'PotatCommandResponse' && msg.id === id) {
+          process.off('message', listener);
+          msg.error ? reject(new Error(msg.error)) : resolve(msg.result);
+        }
+      };
+
+      process.on('message', listener);
+
+      process.send({
+        type: 'PotatCommandRequest',
+        commandName,
+        args,
+        msg,
+        id
+      });
+
+      setTimeout(() => {
+        process.off('message', listener);
+        reject(new Error('Command request timed out'));
+      }, 10000);
+    });
+  };
 
   private async eval(code: string, msg?: Record<string, any>): Promise<string> {
     return new Promise(async (resolve, reject) => {
@@ -342,7 +406,7 @@ export class Evaluator {
               [__getKey(flag, $3), key], 
               { result: { promise: true } }
             ),
-            ex: (key, seconds, flag) => $5.apply(
+            ex: (key, seconds, flag) => $7.apply(
               undefined,
               [__getKey(flag, $3), key, seconds],
               { result: { promise: true } }
@@ -367,6 +431,18 @@ export class Evaluator {
           });
 
           Object.freeze(global.fetch);
+
+          if ($8) {
+            global.command = (name, ...args) => $8.apply(
+              undefined,
+              [name, ...args],
+              { arguments: { copy: true }, result: { promise: true, copy: true } }
+            );
+            global.c = global.command;
+            
+            Object.freeze(global.command);
+            Object.freeze(global.c);
+          }
           `,
           [
             new Reference(store.get),
@@ -377,6 +453,7 @@ export class Evaluator {
             new Reference(this.fetchImplement.bind(this, potatData)),
             new Reference(store.len),
             new Reference(store.ex),
+            new Reference(this.runCommand.bind(this)),
           ],
         );
 
@@ -448,12 +525,14 @@ export class Evaluator {
       // Promise aborted by timeout.
       if (e.constructor.name === 'DOMException') {
         Logger.warn(`Evaluation request timed out: ${e.message}`);
+
         return new ExternalCopy({
           body: 'Request timed out.',
           status: 408
         }).copyInto();
       }
       Logger.warn(`Evaluation api request failed: ${e.message}`);
+
       return new ExternalCopy({
         body: `Request failed - ${e.constructor.name}: ${e.cause ?? e.message}`,
         status: 400
@@ -466,6 +545,7 @@ export class Evaluator {
   private timeout() {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), this.config.fetchTimeout);
+
     return controller.signal;
   }
 
@@ -517,6 +597,7 @@ export class Evaluator {
     let data: any;
     try { data = JSON.parse(await blob.text()); }
     catch { data = await blob.text(); }
+
     return data;
   }
 }(config);
