@@ -3,6 +3,20 @@ import Logger from '../logger.js';
 
 const config = require('../config.json');
 
+const validateData = (data: unknown): boolean => {
+  if (typeof data === 'string') {
+    return data.length <= 10000;
+  } else if (typeof data === 'number') {
+    return data.toString().length <= 10000;
+  } else if (typeof data === 'boolean') {
+    return true;
+  } else if (typeof data === 'object') {
+    return JSON.stringify(data).length <= 10000;
+  } else {
+    return false;
+  }
+};
+
 class PotatStore {
   static #instance: PotatStore;
 
@@ -42,18 +56,8 @@ class PotatStore {
     key: string,
     value: unknown,
   ): Promise<number> {
-    const validateData = (data: unknown): boolean => {
-      if (typeof data === 'string') {
-        return data.length <= 10000;
-      } else if (typeof data === 'number') {
-        return data.toString().length <= 10000;
-      } else if (typeof data === 'boolean') {
-        return data.toString().length <= 10000;
-      } else if (typeof data === 'object') {
-        return JSON.stringify(data).length <= 10000;
-      } else {
-        return false;
-      }
+    if (typeof key !== 'string' || key.length > 100) {
+      throw new Error('Key mmust be a string less than 100 characters');
     }
     if (!validateData(value)) {
       throw new Error(`Invalid data type: ${typeof value}`);
