@@ -427,6 +427,11 @@ export class Evaluator {
               [__getKey(flag, $3), key], 
               { result: { promise: true } }
             ),
+            delall: (key, flag) => $9.apply(
+              undefined,
+              [__getKey(flag, $3), key], 
+              { result: { promise: true } }
+            ),
             len: (key, flag) => $6.apply(
               undefined,
               [__getKey(flag, $3), key], 
@@ -443,6 +448,7 @@ export class Evaluator {
           store.g = store.get;
           store.s = store.set;
           store.d = store.del;
+          store.da = store.delall;
           store.l = store.len;
           global.s = store;
           global.p = permissions;
@@ -476,15 +482,16 @@ export class Evaluator {
           }
           `,
           [
-            new Reference(store.get),
-            new Reference(store.set),
-            new Reference(store.del), 
-            new ExternalCopy(msg).copyInto(),
-            new ExternalCopy(permissions).copyInto(),
-            new Reference(this.fetchImplement.bind(this, potatData)),
-            new Reference(store.len),
-            new Reference(store.ex),
-            new Reference(this.runCommand.bind(this)),
+            new Reference(store.get),                                       // $0
+            new Reference(store.set),                                       // $1
+            new Reference(store.del),                                       // $2
+            new ExternalCopy(msg).copyInto(),                               // $3
+            new ExternalCopy(permissions).copyInto(),                       // $4
+            new Reference(this.fetchImplement.bind(this, potatData)),       // $5
+            new Reference(store.len),                                       // $6
+            new Reference(store.ex),                                        // $7
+            new Reference(this.runCommand.bind(this)),                      // $8
+            new Reference(store.delall),                                    // $9
           ],
         );
 

@@ -72,6 +72,10 @@ class PotatStore {
     return this.#client.hdel(key, ...fields);
   }
 
+  public async del(key: string | Buffer): Promise<number> {
+    return this.#client.del(key);
+  }
+
   public async hmget<T = unknown>(
     primaryKey: string,
     key: string,
