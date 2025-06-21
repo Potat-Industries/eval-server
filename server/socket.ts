@@ -104,10 +104,17 @@ export class EvalSocket {
     commandName: string,
     msg: Record<string, any>, 
     args: string[],
-  ): Promise<unknown> {
+  ): Promise<{
+    id?: number | string;
+    code?: string;
+    msg?: Record<string, any>;
+    error?: string;
+  }> {
     if (args.length && args.some(arg => typeof arg !== 'string')) {
       throw new TypeError('Command arguments must be strings!');
     }
+
+    msg.text = args.join(' ');
 
     const id = crypto.randomUUID();
 

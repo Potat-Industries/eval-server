@@ -113,65 +113,22 @@ export class PotatWorker<T extends (...args: any) => any> {
 
   private worker() {
     process.addListener('message', async (m: PotatWorkerMessage<T>) => {
-      switch(m.type) {
-        case 'PotatWorkerRequest':
-          try {
-            const result = await this.workerHandler(...(m.args ?? []));
-  
-            process.send({
-              type: 'PotatWorkerResponse',
-              id: m.id,
-              result,
-            });
-          } catch (error) {
-            process.send({
-              type: 'PotatWorkerResponse',
-              id: m.id,
-              error,
-            });
-          }
+      if (m.type === 'PotatWorkerRequest') {
+        try {
+          const result = await this.workerHandler(...(m.args ?? []));
 
-          break;
-          case 'PotatCommandRequest':
-            console.log('Received command request', m.commandName, m.args, m.msg);
-            try {
-              process.send({
-                type: 'PotatCommandRequest',
-                commandName: m.commandName,
-                args: m.args,
-                msg: m.msg,
-                id: m.id,
-              });
-          
-              const responseHandler = (res: any) => {
-                if (res.type === 'PotatCommandResponse' && res.id === m.id) {
-                  process.removeListener('message', responseHandler);
-          
-                  process.send({
-                    type: 'PotatWorkerResponse',
-                    id: res.id,
-                    result: res.result,
-                    error: res.error,
-                  });
-                }
-              };
-          
-              process.addListener('message', responseHandler);
-            } catch (error) {
-              process.send({
-                type: 'PotatWorkerResponse',
-                id: m.id,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-            break;
-          case 'PotatWorkerResponse':
-          case 'PotatCommandResponse':
-            // This is a response from the worker or command handler
-            break;
-        default:
-          const message = typeof m === 'object' ? JSON.stringify(m) : String(m);
-          Logger.error('Unknown worker message type', message);
+          process.send({
+            type: 'PotatWorkerResponse',
+            id: m.id,
+            result,
+          });
+        } catch (error) {
+          process.send({
+            type: 'PotatWorkerResponse',
+            id: m.id,
+            error,
+          });
+        }
       }
     });
   }

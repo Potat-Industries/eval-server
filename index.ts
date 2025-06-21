@@ -117,8 +117,16 @@ export class Evaluator {
             const result = await this.socket?.runCommand?.(
               message.commandName,
               message.msg,
-              message.args
+              message.args,
             );
+
+            if (!result || result.error) {
+              worker.send({
+                type: 'PotatCommandResponse',
+                id: message.id,
+                error: result?.error ?? 'Unknown error',
+              });
+            }
     
             worker.send({
               type: 'PotatCommandResponse',
@@ -157,6 +165,18 @@ export class Evaluator {
   private async handleEvalRequests(code: string, msg: any): Promise<EvalResponse> {
     const start = performance.now();
     const duration = () => parseFloat((performance.now() - start).toFixed(4));
+
+    if (typeof code !== "string" || !code.trim()) {
+      Logger.error(`Invalid code supplied: ${code}`);
+      return {
+        statusCode: 400,
+        data: [],
+        duration: duration(),
+        errors: [{
+          message: typeof code !== "string" ? "Invalid code" : "Missing code"
+        }],
+      };
+    }
 
     Logger.debug(
       `Evaluating code: ${code.length > 30 ? code.slice(0, 30) + '...' : code}`,
@@ -283,7 +303,7 @@ export class Evaluator {
       const listener = (msg: any) => {
         if (msg.type === 'PotatCommandResponse' && msg.id === id) {
           process.off('message', listener);
-          msg.error ? reject(new Error(msg.error)) : resolve(msg.result);
+          msg.error ? reject(new Error(msg.error)) : resolve(msg.result?.code);
         }
       };
 
@@ -442,6 +462,11 @@ export class Evaluator {
             
             Object.freeze(global.command);
             Object.freeze(global.c);
+          }
+
+          // Tomfoolery
+          global.process = {
+            exit: (code) => throw new Error('Exiting process forcibly.')
           }
           `,
           [
