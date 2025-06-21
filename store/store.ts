@@ -17,7 +17,7 @@ const set = async (
   data: unknown,
   expirySeconds: number,
 ): Promise<unknown | undefined> => {
-  const len = await redis.hlen(key);
+  const len = await redis.hlen(privateKey);
   if (len > MAX_KEYS) {
     throw new Error(`Too many keys in store: ${key}`);
   }
