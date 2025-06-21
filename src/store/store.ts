@@ -52,6 +52,10 @@ const del = async (
 const delall = async (
   privateKey: string,
 ): Promise<number> => {
+  if (!redis.ready) {
+    throw new Error('Redis store is not initialized');
+  }
+  
   return redis.del(privateKey);
 };
 
