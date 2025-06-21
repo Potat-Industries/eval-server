@@ -164,7 +164,7 @@ export class EvalSocket {
       'LOL',
       'You are in a maze of twisty little passages, all alike',
       'I am a fish',
-      'potatos are actually vegetables did you know this, have you heard about this?',
+      'potatoes are actually vegetables did you know this, have you heard about this?',
       'hamburger',
     ];
 
