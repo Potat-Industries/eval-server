@@ -49,6 +49,12 @@ const del = async (
   return redis.hdel(privateKey, key);
 };
 
+const delall = async (
+  privateKey: string,
+): Promise<number> => {
+  return redis.del(privateKey);
+};
+
 const ex = async (
   privateKey: string,
   key: string,
@@ -74,6 +80,7 @@ export const store = {
   get,
   set,
   del,
+  delall,
   len,
   ex,
 };
