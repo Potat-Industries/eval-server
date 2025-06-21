@@ -2,7 +2,7 @@ import Redis from 'ioredis';
 import Logger from '../util/logger.js';
 import config from '../../config.json' with { type: 'json' };
 
-const validateData = (data: unknown): data is 'string' | 'number' | 'boolean' | 'object' => {
+const validateData = (data: unknown): data is string | number | boolean | object => {
   if (typeof data === 'string') {
     return data.length <= 10000;
   } else if (typeof data === 'number') {
