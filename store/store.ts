@@ -24,7 +24,7 @@ const set = async (
     throw new Error('Redis store is not initialized');
   }
 
-  const len = await redis.hlen(key);
+  const len = await redis.hlen(privateKey);
   if (len > MAX_KEYS) {
     throw new Error(`Too many keys in store: ${key}`);
   }
