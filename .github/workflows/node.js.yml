@@ -2,9 +2,9 @@ name: Node.js CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
 jobs:
   build:
@@ -15,10 +15,9 @@ jobs:
     - name: Use Node.js 24
       uses: actions/setup-node@v4
       with:
-        node-version: '24''
+        node-version: '24'
         cache: 'npm'
-    - run: cp configs/exampleconfig.json configs/config.json
-    - run: echo "[]" > configs/accounts.json
+    - run: cp exampleconfig.json config.json
     - run: npm ci
     - run: npx tsc
 
@@ -30,7 +29,7 @@ jobs:
     - name: Use Node.js 24
       uses: actions/setup-node@v4
       with:
-        node-version: '24''
+        node-version: '24'
         cache: 'npm'
     - run: npm ci
     - run: npm run lint

@@ -1,0 +1,9 @@
+{
+  "auth": "",
+  "port": 1234,
+  "wssPort": 5678,
+  "maxFetchConcurrency": 5,
+
+  "redisHost": "localhost",
+  "redisPort": 6777
+}
