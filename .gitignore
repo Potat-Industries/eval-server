@@ -7,3 +7,4 @@ node_modules
 # build files
 *.js
 *.d.ts
+dist

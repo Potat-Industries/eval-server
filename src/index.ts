@@ -1,16 +1,18 @@
-import os from "node:os";
-import Cluster from "node:cluster";
-import { ExternalCopy, Isolate, Reference, Copy } from "isolated-vm";
+import os from 'node:os';
+import Cluster from 'node:cluster';
 import { Agent, fetch, Pool } from 'undici';
-import dns from "dns";
+import dns from 'dns';
 import ip from 'ip';
-import { Utils } from "./sandbox-utils.js";
-import { EvalSocket, EvalResponse, EvalServer } from "./server";
-import { PotatWorkersPool } from "./workers";
-import Logger from "./logger.js";
-import { store } from "./store/store.js";
+import { Utils } from './util/sandbox-utils.js';
+import { EvalSocket, EvalResponse, EvalServer } from './server/index.js';
+import { PotatCommandResponse, PotatWorkersPool } from './workers/index.js';
+import Logger from './util/logger.js';
+import { store } from './store/store.js';
+import config from '../config.json' with { type: 'json' };
 
-const config = require('./config.json');
+
+import pkg, { Copy } from 'isolated-vm';
+const { ExternalCopy, Isolate, Reference } = pkg;
 
 export interface Config {
   port: number;
@@ -44,7 +46,7 @@ const defaultConfig: Partial<Config> = {
   vmTimeout: 14000,
 
   maxChildProcessCount: os.availableParallelism(),
-}
+};
 
 interface Waiter {
   code: string;
@@ -105,8 +107,8 @@ export class Evaluator {
   private readonly pool: PotatWorkersPool<typeof this.add>;
   private readonly config: Config;
 
-  public constructor(config: Config) {
-    this.config = config;
+  public constructor(configuration: Config) {
+    this.config = configuration;
 
     if (Cluster.isPrimary) {
       this.startServer();
@@ -166,14 +168,14 @@ export class Evaluator {
     const start = performance.now();
     const duration = () => parseFloat((performance.now() - start).toFixed(4));
 
-    if (typeof code !== "string" || !code.trim()) {
+    if (typeof code !== 'string' || !code.trim()) {
       Logger.error(`Invalid code supplied: ${code}`);
       return {
         statusCode: 400,
         data: [],
         duration: duration(),
         errors: [{
-          message: typeof code !== "string" ? "Invalid code" : "Missing code"
+          message: typeof code !== 'string' ? 'Invalid code' : 'Missing code',
         }],
       };
     }
@@ -182,25 +184,25 @@ export class Evaluator {
       `Evaluating code: ${code.length > 30 ? code.slice(0, 30) + '...' : code}`,
     );
 
-    if (!code || typeof code !== "string") {
+    if (!code || typeof code !== 'string') {
       Logger.error(`Invalid code supplied: ${code}`);
       return {
         statusCode: 400,
         data: [],
         duration: duration(),
         errors: [{
-          message: typeof code !== "string" ? "Invalid code" : "Missing code"
+          message: typeof code !== 'string' ? 'Invalid code' : 'Missing code',
         }],
       };
     }
 
-    if (msg && typeof msg !== "object") {
+    if (msg && typeof msg !== 'object') {
       Logger.error(`Invalid message supplied: ${msg}`);
       return {
         statusCode: 400,
         data: [],
         duration: duration(),
-        errors: [{ message: "Invalid message" }],
+        errors: [{ message: 'Invalid message' }],
       };
     }
 
@@ -212,7 +214,7 @@ export class Evaluator {
         duration: duration(),
         data: [String(result)],
         errors: [],
-      }
+      };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
 
@@ -221,8 +223,8 @@ export class Evaluator {
         statusCode: 500,
         data: [],
         duration: duration(),
-        errors: [{ message: message || "Internal server error" }],
-      }
+        errors: [{ message: message || 'Internal server error' }],
+      };
     }
   }
 
@@ -253,7 +255,7 @@ export class Evaluator {
     this.processing = false;
   }
 
-  private filterMessage(msg: Record<string, any>): EvalPotatData | undefined {
+  private filterMessage(msg: Record<string, any>): EvalPotatData {
     delete msg?.channel?.commands;
     delete msg?.command?.description;
     delete msg?.channel?.blocks;
@@ -261,10 +263,10 @@ export class Evaluator {
     const potatData: EvalPotatData = {
       user: msg?.user,
       channel: msg?.channel,
-      id: `${msg?.id ?? ""}`,
+      id: `${msg?.id ?? ''}`,
       timestamp: msg?.timestamp ?? Date.now(),
       isSilent: !!msg?.command?.silent,
-      platform: msg?.platform ?? "PotatEval",
+      platform: msg?.platform ?? 'PotatEval',
       emotes: msg?.emotes ?? [],
       fragments: msg?.fragments ?? [],
     };
@@ -288,7 +290,7 @@ export class Evaluator {
 
     return {
       ...this.makePotatDataHeaders(parent, id + 1),
-      [name]: value
+      [name]: value,
     };
   }
 
@@ -300,21 +302,25 @@ export class Evaluator {
     return new Promise((resolve, reject) => {
       const id = Math.random().toString(36).slice(2);
 
-      const listener = (msg: any) => {
-        if (msg.type === 'PotatCommandResponse' && msg.id === id) {
+      const listener = (response: PotatCommandResponse) => {
+        if (response.type === 'PotatCommandResponse' && response.id === id) {
           process.off('message', listener);
-          msg.error ? reject(new Error(msg.error)) : resolve(msg.result?.code);
+          if (response.error) {
+            return reject(new Error(response.error));
+          }
+
+          return resolve(response.result);
         }
       };
 
       process.on('message', listener);
 
-      process.send({
+      process.send?.({
         type: 'PotatCommandRequest',
         commandName,
         args,
         msg,
-        id
+        id,
       });
 
       setTimeout(() => {
@@ -335,9 +341,9 @@ export class Evaluator {
         const context = await isolate.createContext();
         const jail = context.global;
 
-        await jail.set("global", jail.derefInto());
+        await jail.set('global', jail.derefInto());
 
-        const potatData = this.filterMessage(msg);
+        const potatData: EvalPotatData = msg ? this.filterMessage(msg) : {} as EvalPotatData;
 
         const permissions = {
           command: 1 << 1,
@@ -348,7 +354,7 @@ export class Evaluator {
           ch: 1 << 3,
         };
 
-        await jail.set("permissions", new ExternalCopy(permissions).copyInto());
+        await jail.set('permissions', new ExternalCopy(permissions).copyInto());
 
         const prelude = `
           'use strict';
@@ -466,7 +472,7 @@ export class Evaluator {
 
           // Tomfoolery
           global.process = {
-            exit: (code) => throw new Error('Exiting process forcibly.')
+            exit: (code) => { throw new Error('Exiting process forcibly.'); },
           }
           `,
           [
@@ -493,23 +499,23 @@ export class Evaluator {
               return $0.apply(undefined, [], { result: { promise: true } })
             }`,
             [],
-            { arguments: { reference: true } }
+            { arguments: { reference: true } },
           );
         } else {
-          code = prelude + `toString(eval('${code?.replace(/[\\"']/g, "\\$&")}'))`;
+          code = prelude + `toString(eval('${code?.replace(/[\\"']/g, '\\$&')}'))`;
         }
 
         const result = await context.eval(code, { 
           timeout: this.config.vmTimeout + 1e3, 
-          promise: true
+          promise: true,
         });
 
         this.concurrencyCounter = 0;
 
         resolve((result ?? null)?.slice(0, this.config.fetchMaxResponseLength));
       } catch (e) {
-        Logger.error(`Error evaluating code: ${e.stack}`);
-        resolve('🚫 ' + e.constructor.name + ': ' + e.message);
+        Logger.error(`Error evaluating code: ${(e as Error).stack}`);
+        resolve('🚫 ' + (e as Error).constructor.name + ': ' + (e as Error).message);
       } finally {
         isolate.dispose();
       }
@@ -523,7 +529,7 @@ export class Evaluator {
       if (this.concurrencyCounter > this.config.maxFetchConcurrency) {
         return new ExternalCopy({
           body: 'Too many requests.',
-          status: 429
+          status: 429,
         }).copyInto();
       }
 
@@ -540,27 +546,27 @@ export class Evaluator {
           ...options?.headers ?? {},
           'User-Agent': 'Sandbox Unsafe JavaScript Execution Environment - https://github.com/RyanPotat/eval-server/',
           ...(options?.withDataHeaders || url.startsWith('https://fun.joet.me') ? this.makePotatDataHeaders(potatData) : {}),
-        }
-      })
+        },
+      });
 
       return new ExternalCopy({
-        body: await this.parseBlob(await res.blob()), status: res.status
+        body: await this.parseBlob(await res.blob()), status: res.status,
       }).copyInto();
     } catch (e) {
       // Promise aborted by timeout.
-      if (e.constructor.name === 'DOMException') {
-        Logger.warn(`Evaluation request timed out: ${e.message}`);
+      if ((e as Error).constructor.name === 'DOMException') {
+        Logger.warn(`Evaluation request timed out: ${(e as Error).message}`);
 
         return new ExternalCopy({
           body: 'Request timed out.',
-          status: 408
+          status: 408,
         }).copyInto();
       }
-      Logger.warn(`Evaluation api request failed: ${e.message}`);
+      Logger.warn(`Evaluation api request failed: ${(e as Error).message}`);
 
       return new ExternalCopy({
-        body: `Request failed - ${e.constructor.name}: ${e.cause ?? e.message}`,
-        status: 400
+        body: `Request failed - ${(e as Error).constructor.name}: ${(e as Error).cause ?? (e as Error).message}`,
+        status: 400,
       }).copyInto();
     } finally {
       this.concurrencyCounter--;
@@ -574,10 +580,10 @@ export class Evaluator {
     return controller.signal;
   }
 
-  private dnsLookup(hostname: string, options: dns.LookupOptions, cb: (e: Error | null, address?: string | dns.LookupAddress[], family?: number) => void) {
+  private dnsLookup(hostname: string, options: dns.LookupOptions, cb: (e: Error | null, address: string | dns.LookupAddress[], family?: number) => void) {
     dns.lookup(hostname, options, (err, addr, fam) => {
       if (err !== null) {
-        return cb(err);
+        return cb(err, '', fam);
       }
 
       const addresses = Array.isArray(addr) ? addr : [addr];
@@ -589,10 +595,10 @@ export class Evaluator {
           this.throwIfPrivateIP(value);
         }
       } catch (e) {
-        return cb(e);
+        return cb((e as Error), '', fam);
       }
 
-      cb(null, addr, fam);
+      cb(null, addr || '', fam);
     });
   }
 
@@ -601,7 +607,7 @@ export class Evaluator {
 
     const ipv6adresss = url.hostname.match(/^\[(.*)\]$/);
 
-    if (ip.isV6Format(ipv6adresss?.[1])) {
+    if (ipv6adresss?.[1] && ip.isV6Format(ipv6adresss?.[1])) {
       this.throwIfPrivateIP(ipv6adresss?.[1]);
     }
 
@@ -625,11 +631,11 @@ export class Evaluator {
 
     return data;
   }
-}(config);
+};
 
 const configuration = {
   ...defaultConfig,
-  ...config
+  ...config,
 } as Config;
 
 new Evaluator(configuration);

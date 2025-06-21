@@ -1,5 +1,5 @@
-import cluster from "cluster";
-import { PotatWorker } from "./worker";
+import cluster from 'cluster';
+import { PotatWorker } from './worker.js';
 
 export interface PotatWorkersPoolSettings {
   maxQueueSizePerWorker: number;
@@ -11,10 +11,14 @@ export interface PotatWorkersPoolSettings {
 export class PotatWorkersPool<T extends (...args: any) => any> {
   private workers: PotatWorker<T>[] = [];
 
+  private readonly settings: PotatWorkersPoolSettings;
+
   public constructor(
     workerHandler: T,
     size: number,
-    private readonly settings: PotatWorkersPoolSettings) {
+    settings: PotatWorkersPoolSettings,
+  ) {
+    this.settings = settings;
 
     if (cluster.isPrimary) {
       for (let i = 0; i < size; i++) {
@@ -27,7 +31,7 @@ export class PotatWorkersPool<T extends (...args: any) => any> {
 
   public add(...args: Parameters<T>): Promise<ReturnType<T>> {
     if (!cluster.isPrimary) {
-      throw new Error("PotatWorkersPool can only be used in the primary process.");
+      throw new Error('PotatWorkersPool can only be used in the primary process.');
     }
 
     const worker = this.pickWorker();
@@ -41,7 +45,7 @@ export class PotatWorkersPool<T extends (...args: any) => any> {
       .sort((a, b) => a.queueSize - b.queueSize)[0];
 
     if (!worker) {
-      throw new Error("The queue is full.");
+      throw new Error('The queue is full.');
     }
 
     return worker;

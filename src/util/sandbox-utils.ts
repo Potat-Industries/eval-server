@@ -1,4 +1,4 @@
-import IsolatedVM from "isolated-vm";
+import IsolatedVM from 'isolated-vm';
 
 export class Utils {
   static instance: Utils;
@@ -6,7 +6,7 @@ export class Utils {
   private constructor() {}
 
   public static async inject(
-    context: IsolatedVM.Reference<Record<string | number | symbol, any>>
+    context: IsolatedVM.Reference<Record<string | number | symbol, any>>,
   ): Promise<void> {
     const _this = this.instance ?? (this.instance = new this());
     const thisClass = Object.getOwnPropertyNames(this.prototype);
@@ -14,7 +14,7 @@ export class Utils {
       if (method === 'constructor') {
         continue;
       }
-      await context.set(method, _this[method]);
+      await context.set(method, _this[method as keyof Utils]);
     }
   }
 
@@ -59,7 +59,7 @@ export class Utils {
   public shuffleArray<T>(array: T[]): T[] {
     for (let i = array.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
-      [array[i], array[j]] = [array[j], array[i]];
+      [array[i]!, array[j]!] = [array[j]!, array[i]!];
     }
     return array;
   }
@@ -68,7 +68,7 @@ export class Utils {
     const chars = str.split('');
     for (let i = chars.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [chars[i], chars[j]] = [chars[j], chars[i]];
+      [chars[i]!, chars[j]!] = [chars[j]!, chars[i]!];
     }
     return chars.join('');
   }

@@ -1,9 +1,8 @@
 import Redis from 'ioredis';
-import Logger from '../logger.js';
+import Logger from '../util/logger.js';
+import config from '../../config.json' with { type: 'json' };
 
-const config = require('../config.json');
-
-const validateData = (data: unknown): boolean => {
+const validateData = (data: unknown): data is 'string' | 'number' | 'boolean' | 'object' => {
   if (typeof data === 'string') {
     return data.length <= 10000;
   } else if (typeof data === 'number') {
@@ -33,7 +32,7 @@ class PotatStore {
       port: config.redisPort ?? 6777,
     });
 
-    this.#client.on('close', (err) => {
+    this.#client.on('close', (err: Error) => {
       this.#isReady = false;
       Logger.error(`Redis Error: ${err}`);
     });
@@ -58,7 +57,7 @@ class PotatStore {
       throw new Error('Key mmust be a string less than 100 characters');
     }
     if (!validateData(value)) {
-      throw new Error(`Invalid data type: ${typeof value}`);
+      throw new Error(`Invalid value input.`);
     }
 
     const data = typeof value === 'object' ? JSON.stringify(value) : value.toString();

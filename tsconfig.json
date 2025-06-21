@@ -1,29 +1,40 @@
 {
   "compilerOptions": {
-    "baseUrl": "./",
-    "checkJs": true,
-    "module": "CommonJS",
+    "baseUrl": "./src",
+    "outDir": "dist",
+    "rootDir": "./src",
+    "module": "ESNext",
     "target": "ESNext",
     "lib": ["dom", "ESNext"],
-    "outDir": "",
-    "downlevelIteration": true,
-    "resolveJsonModule": true,
-    "declaration": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "removeComments": false,
-    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "moduleResolution": "Node",
+    "sourceMap": true,
+    "declaration": true,
+
+    "strict": true,
+    "alwaysStrict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictPropertyInitialization": true,
+    "strictBindCallApply": true,
+    "strictFunctionTypes": true,
+    "noUnusedLocals": true,
+    "skipLibCheck": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
     "typeRoots": [
       "./node_modules/@types",
-      "./node_modules/@types/*",
       "./types"
-    ],
-    "paths": {}
+    ]
   },
-  "include": ["**/*"],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
 }

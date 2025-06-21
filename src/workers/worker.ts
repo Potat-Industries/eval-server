@@ -1,5 +1,5 @@
-import Logger from "../logger";
-import Cluster from "node:cluster";
+import Logger from '../util/logger.js';
+import Cluster from 'node:cluster';
 
 interface PotatWorkerRequest<T extends (...args: any) => any> {
   type: 'PotatWorkerRequest';
@@ -19,14 +19,14 @@ interface PotatCommandRequest {
   commandName: string;
   args: any[];
   msg: Record<string, any>;
-  id: number;
+  id: string;
 }
 
-interface PotatCommandResponse {
+export interface PotatCommandResponse {
   type: 'PotatCommandResponse';
-  id: number;
+  id: string;
   result?: any;
-  error?: Error | string;
+  error?: string;
 }
 
 type PotatWorkerMessage<T  extends (...args: any)=> any> = 
@@ -44,7 +44,7 @@ export class PotatWorker<T extends (...args: any) => any> {
   ) => void) | undefined;
 
   private readonly workerHandler: T;
-  private readonly workerTimeOut: number;
+  public readonly workerTimeOut: number;
   private readonly workerExecutionTimeout: number;
 
   private id = 0;
@@ -86,9 +86,11 @@ export class PotatWorker<T extends (...args: any) => any> {
 
     return new Promise<ReturnType<T>>((resolve, reject) => {
       queueSizeObject = this.queueSizeValue;
-      queueSizeObject.value++;
+      if (queueSizeObject?.value) {
+        queueSizeObject.value++;
+      }
 
-      let tm = setTimeout(() => {
+      const tm = setTimeout(() => {
         reject(new Error('Worker execution timed out.'));
       }, this.workerExecutionTimeout);
 
@@ -96,34 +98,38 @@ export class PotatWorker<T extends (...args: any) => any> {
         return reject(new Error('Worker is not ready.'));
       }
 
-      const watcher = (error: Error | undefined, m: ReturnType<T>) => {
+      const watcher = (error: Error | undefined, m: ReturnType<T> | undefined) => {
         if (error) {
           reject(error);
-        } else {
+        } else if (m !== undefined) {
           resolve(m);
+        } else {
+          reject(new Error('Unexpected undefined result.'));
         }
         clearTimeout(tm);
       };
 
-      this.requestsHandler!(args, watcher);
+      this.requestsHandler!(args, watcher as PotatRequestHandlerCallback<T>);
     }).finally(() => {
-      queueSizeObject.value--;
+      if (queueSizeObject?.value) {
+        queueSizeObject.value--;
+      }
     });
   }
 
   private worker() {
-    process.addListener('message', async (m: PotatWorkerMessage<T>) => {
+    process.on('message', async (m: PotatWorkerMessage<T>) => {
       if (m.type === 'PotatWorkerRequest') {
         try {
           const result = await this.workerHandler(...(m.args ?? []));
 
-          process.send({
+          process.send?.({
             type: 'PotatWorkerResponse',
             id: m.id,
             result,
           });
         } catch (error) {
-          process.send({
+          process.send?.({
             type: 'PotatWorkerResponse',
             id: m.id,
             error,
@@ -158,7 +164,7 @@ export class PotatWorker<T extends (...args: any) => any> {
           lastRequest = Date.now();
 
           callbacks.set(id, callback);
-        }
+        };
 
         worker.addListener('message', (m: PotatWorkerResponse<T>) => {
           if (m.type === 'PotatWorkerResponse') {
@@ -191,14 +197,14 @@ export class PotatWorker<T extends (...args: any) => any> {
               reject(new Error('Worker is not responding.'));
               worker.kill('SIGKILL');
             } catch (e) {
-              Logger.error('Failed to kill worker', e);
+              Logger.error('Failed to kill worker', (e as Error)?.message);
             }
-          })
+          });
         });
 
         this.requestsHandler = undefined;
       } catch (e) {
-        Logger.error('Worker died', e);
+        Logger.error('Worker died', (e as Error)?.message);
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000));

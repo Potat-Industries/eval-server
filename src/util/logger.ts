@@ -22,26 +22,28 @@ export default new class LoggerInstance {
               return `EVL ${timestamp} ${chalk.bgYellow.bold(' WARN ')} ${chalk.yellow(message)}`;
             case 'debug':
               return `EVL ${timestamp} ${chalk.bgCyan.bold(' DEBUG ')} ${chalk.cyan(message)}`;
+            default:
+              return `EVL ${timestamp} ${chalk.bgWhite.bold(' LOG ')} ${chalk.white(message)}`;
           }
-        })
+        }),
       ),
-      transports: [new transports.Console()]
+      transports: [new transports.Console()],
     });
   }
 
   public error(...args: string[]): void {
-    this.#winston.log('error', this.toString(args));
+    this.#winston.log?.('error', this.toString(args));
   }
 
   public debug(...args: string[]): void {
-    this.#winston.log('debug', this.toString(args));
+    this.#winston.log?.('debug', this.toString(args));
   }
 
   public warn(...args: string[]): void {
-    this.#winston.log('warn', this.toString(args));
+    this.#winston.log?.('warn', this.toString(args));
   }
 
   public toString(args: string[]): string {
     return args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
   }
-}
+};

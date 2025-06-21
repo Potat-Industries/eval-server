@@ -1,4 +1,4 @@
-import redis from './redis.js'
+import redis from './redis.js';
 
 const MAX_KEYS = 100;
 
@@ -47,7 +47,7 @@ const del = async (
   }
 
   return redis.hdel(privateKey, key);
-}
+};
 
 const ex = async (
   privateKey: string,
@@ -68,7 +68,7 @@ const len = async (privateKey: string): Promise<number> => {
   }
 
   return redis.hlen(privateKey);
-}
+};
 
 export const store = {
   get,
@@ -76,4 +76,4 @@ export const store = {
   del,
   len,
   ex,
-}
+};
