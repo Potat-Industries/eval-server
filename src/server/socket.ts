@@ -79,12 +79,7 @@ export class EvalSocket {
         );
       }
 
-      if (
-        !data?.id || 
-        typeof data.id !== 'string' ||
-        !data?.code || 
-        typeof data.code !== 'string'
-      ) {
+      if (!data?.id || typeof data.id !== 'string') {
         return this.send(
           client,
           { error: 'Invalid or missing ID.' },
@@ -98,6 +93,14 @@ export class EvalSocket {
         this.awaiters.delete(data.id);
         
         return awaiter.resolve(data);
+      }
+
+      if (!data?.code || typeof data.code !== 'string') {
+        return this.send(
+          client,
+          { error: 'Invalid or missing ID.' },
+          EventCode.MALFORMED_DATA,
+        );
       }
 
       const response = await this.handleEvalRequest(data.code, data.msg);

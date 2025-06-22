@@ -309,7 +309,7 @@ export class Evaluator {
             return reject(new Error(response.error));
           }
 
-          return resolve(response.result);
+          return resolve(response.result.code);
         }
       };
 
