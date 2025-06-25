@@ -524,7 +524,9 @@ export class Evaluator {
         Logger.error(`Error evaluating code: ${(e as Error).stack}`);
         resolve('🚫 ' + (e as Error).constructor.name + ': ' + (e as Error).message);
       } finally {
-        isolate.dispose();
+        if (!isolate.isDisposed) {
+          isolate.dispose();
+        }
       }
     });
   }
