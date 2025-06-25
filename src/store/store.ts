@@ -1,17 +1,20 @@
 import redis from './redis.js';
 
+const checkReady = (): void => {
+  if (!redis.ready) {
+    throw new Error('Redis store is not initialized');
+  }
+};
+
 const MAX_KEYS = 100;
 
 const get = async (
   privateKey: string,
   key: string,
 ): Promise<unknown | undefined> => {
-  if (!redis.ready) {
-    throw new Error('Redis store is not initialized');
-  }
-  const user = await redis.hmget(privateKey, key);
+  checkReady();
 
-  return user ?? undefined;
+  return redis.hmget(privateKey, key) ?? undefined;
 };
   
 const set = async (
@@ -20,9 +23,7 @@ const set = async (
   data: unknown,
   expirySeconds: number,
 ): Promise<unknown | undefined> => {
-  if (!redis.ready) {
-    throw new Error('Redis store is not initialized');
-  }
+  checkReady();
 
   const len = await redis.hlen(privateKey);
   if (len > MAX_KEYS) {
@@ -42,9 +43,7 @@ const del = async (
   privateKey: string,
   key: string,
 ): Promise<unknown | undefined> => {
-  if (!redis.ready) {
-    throw new Error('Redis store is not initialized');
-  }
+  checkReady();
 
   return redis.hdel(privateKey, key);
 };
@@ -52,9 +51,7 @@ const del = async (
 const delall = async (
   privateKey: string,
 ): Promise<number> => {
-  if (!redis.ready) {
-    throw new Error('Redis store is not initialized');
-  }
+  checkReady();
   
   return redis.del(privateKey);
 };
@@ -65,17 +62,13 @@ const ex = async (
   expiry: number,
   mode: 'NX' | 'XX' | 'GT' | 'LT' = 'NX',
 ): Promise<unknown | undefined> => {
-  if (!redis.ready) {
-    throw new Error('Redis store is not initialized');
-  }
+  checkReady();
 
   return redis.hexpire(privateKey, expiry, key, mode);
 };
 
 const len = async (privateKey: string): Promise<number> => {
-  if (!redis.ready) {
-    throw new Error('Redis store is not initialized');
-  }
+  checkReady();
 
   return redis.hlen(privateKey);
 };
