@@ -427,9 +427,9 @@ export class Evaluator {
               [__getKey(flag, $3), key], 
               { result: { promise: true } }
             ),
-            delall: (key, flag) => $9.apply(
+            delall: (flag) => $9.apply(
               undefined,
-              [__getKey(flag, $3), key], 
+              [__getKey(flag, $3)], 
               { result: { promise: true } }
             ),
             len: (key, flag) => $6.apply(
