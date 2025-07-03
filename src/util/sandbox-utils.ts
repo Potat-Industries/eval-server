@@ -76,4 +76,30 @@ export class Utils {
   public randomInt(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
+
+  public humanizeDuration(ms: number): string {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    const months = Math.floor(days / 30);
+    const years = Math.floor(months / 12);
+
+    if (years > 0) {
+      return `${years}y ${months % 12}mo ${days % 30}d ${hours % 24}h ${minutes % 60}m ${seconds % 60}s`;
+    }
+    if (months > 0) {
+      return `${months}mo ${days % 30}d ${hours % 24}h ${minutes % 60}m ${seconds % 60}s`;
+    } 
+    if (days > 0) {
+      return `${days}d ${hours % 24}h ${minutes % 60}m ${seconds % 60}s`;
+    }
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+    }
+    if (minutes > 0) {
+      return `${minutes}m ${seconds % 60}s`;
+    }
+    return `${seconds}s`;
+  }
 }
