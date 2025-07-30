@@ -330,7 +330,7 @@ export class Evaluator {
     });
   };
 
-  private async eval(code: string, msg?: Record<string, any>): Promise<string> {
+  private async eval(code: string, msg?: Record<string, any>): Promise<string | null> {
     return new Promise(async (resolve, reject) => {
       const isolate = new Isolate({
         memoryLimit: 8,
@@ -519,7 +519,9 @@ export class Evaluator {
 
         this.concurrencyCounter = 0;
 
-        resolve((result ?? null)?.slice(0, this.config.fetchMaxResponseLength));
+        Logger.debug('Evalutaed code with return type: ', typeof result);
+
+        return resolve(String(result).slice(0, this.config.fetchMaxResponseLength));
       } catch (e) {
         Logger.error(`Error evaluating code: ${(e as Error).stack}`);
         resolve('🚫 ' + (e as Error).constructor.name + ': ' + (e as Error).message);
