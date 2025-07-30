@@ -1,5 +1,13 @@
 import IsolatedVM from 'isolated-vm';
 
+const randomizer = <T>(array: T[]): T[] => {
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i]!, array[j]!] = [array[j]!, array[i]!];
+  }
+  return array;
+};
+
 export class Utils {
   static instance: Utils;
 
@@ -36,8 +44,10 @@ export class Utils {
     return btoa(str);
   }
 
-  public randomSlice(array: any[], size: number): any[] {
-    return this.shuffleArray(array).slice(0, size);
+  public randomSlice<T>(arr: T[], len: number): T[] {
+    const array = randomizer(arr);
+
+    return array.slice(0, len);
   }
 
   public splitArray(arr: any[], len: number): any[] {
@@ -57,11 +67,7 @@ export class Utils {
   }
 
   public shuffleArray<T>(array: T[]): T[] {
-    for (let i = array.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [array[i]!, array[j]!] = [array[j]!, array[i]!];
-    }
-    return array;
+    return randomizer(array);
   }
 
   public shuffleString(str: string): string {
