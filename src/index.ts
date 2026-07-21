@@ -65,6 +65,7 @@ interface EvalPotatData {
   isSilent: boolean;
   emotes: Array<MessageFragmentEmote>;
   fragments: Array<MessageFragment>;
+  commandId: string | undefined;
 };
 
 interface MessageFragment {
@@ -106,6 +107,14 @@ export class Evaluator {
   
   private readonly pool: PotatWorkersPool<typeof this.add>;
   private readonly config: Config;
+  private readonly permissions = {
+    command: 1 << 1,
+    c: 1 << 1,
+    user: 1 << 2,
+    u: 1 << 2,
+    channel: 1 << 3,
+    ch: 1 << 3,
+  };
 
   public constructor(configuration: Config) {
     this.config = configuration;
@@ -269,6 +278,7 @@ export class Evaluator {
       platform: msg?.platform ?? 'PotatEval',
       emotes: msg?.emotes ?? [],
       fragments: msg?.fragments ?? [],
+      commandId: msg.parent?.command?.command_id ?? msg.command?.command_id ?? '', // @todo implement
     };
 
     if (msg.parent) {
@@ -341,20 +351,11 @@ export class Evaluator {
         const context = await isolate.createContext();
         const jail = context.global;
 
-        await jail.set('global', jail.derefInto());
-
-        const potatData: EvalPotatData = msg ? this.filterMessage(msg) : {} as EvalPotatData;
-
-        const permissions = {
-          command: 1 << 1,
-          c: 1 << 1,
-          user: 1 << 2,
-          u: 1 << 2,
-          channel: 1 << 3,
-          ch: 1 << 3,
-        };
-
-        await jail.set('permissions', new ExternalCopy(permissions).copyInto());
+        await Promise.all([
+          jail.set('global', jail.derefInto()),
+          jail.set('msg', new ExternalCopy(msg ?? {}).copyInto()),
+          jail.set('permissions', new ExternalCopy(this.permissions).copyInto()),
+        ]);
 
         const prelude = `
           'use strict';
@@ -375,9 +376,9 @@ export class Evaluator {
 
             return JSON.stringify(value);
           };
-
-          const msg = JSON.parse(${JSON.stringify(JSON.stringify(msg ?? {}))});
         `;
+
+        const potatData: EvalPotatData = msg ? this.filterMessage(msg) : {} as EvalPotatData;
 
         await context.evalClosure(
           `
@@ -395,10 +396,13 @@ export class Evaluator {
             }
 
             if (flags & $4.command) {
-              if (!msg.command.id) {
+              if (
+                !msg.commandId && 
+                !msg.parent?.commandId
+              ) {
                 throw new Error("commandID is required for command scope");
               }
-              segments.push('command', msg.command.id);
+              segments.push('command', msg.parentCommand?.commandId ?? msg.parent?.parentCommand?.commandId);
             }
 
             if (flags & $4.channel) {
@@ -486,7 +490,7 @@ export class Evaluator {
             new Reference(store.set),                                       // $1
             new Reference(store.del),                                       // $2
             new ExternalCopy(msg).copyInto(),                               // $3
-            new ExternalCopy(permissions).copyInto(),                       // $4
+            new ExternalCopy(this.permissions).copyInto(),                  // $4
             new Reference(this.fetchImplement.bind(this, potatData)),       // $5
             new Reference(store.len),                                       // $6
             new Reference(store.ex),                                        // $7
@@ -518,8 +522,6 @@ export class Evaluator {
         });
 
         this.concurrencyCounter = 0;
-
-        Logger.debug('Evalutaed code with return type: ', typeof result);
 
         return resolve(String(result).slice(0, this.config.fetchMaxResponseLength));
       } catch (e) {
@@ -635,7 +637,7 @@ export class Evaluator {
     }
   }
 
-  private async parseBlob(blob: Blob): Promise<string> {
+  private async parseBlob(blob: Blob | import('buffer').Blob): Promise<string> {
     let data: any;
     try { data = JSON.parse(await blob.text()); }
     catch { data = await blob.text(); }
