@@ -394,12 +394,13 @@ export class Evaluator {
             }
 
             if (flags & $4.command) {
-              const commandID = msg.parent?.command?.command_id ?? msg.command?.command_id;
+              const customCommandId = msg.parent?.command?.command_id;
 
-              if (commandID == null) {
+              if (customCommandId == null) {
                 throw new Error("commandID is required for command scope");
               }
-              segments.push('command', commandID);
+
+              segments.push('command', customCommandId);
             }
 
             if (flags & $4.channel) {
