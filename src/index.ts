@@ -65,7 +65,6 @@ interface EvalPotatData {
   isSilent: boolean;
   emotes: Array<MessageFragmentEmote>;
   fragments: Array<MessageFragment>;
-  commandId: string | undefined;
 };
 
 interface MessageFragment {
@@ -278,7 +277,6 @@ export class Evaluator {
       platform: msg?.platform ?? 'PotatEval',
       emotes: msg?.emotes ?? [],
       fragments: msg?.fragments ?? [],
-      commandId: msg.parent?.command?.command_id ?? msg.command?.command_id ?? '', // @todo implement
     };
 
     if (msg.parent) {
@@ -396,13 +394,13 @@ export class Evaluator {
             }
 
             if (flags & $4.command) {
-              if (
-                !msg.commandId && 
-                !msg.parent?.commandId
-              ) {
+              const customCommandId = msg.parent?.command?.command_id;
+
+              if (customCommandId == null) {
                 throw new Error("commandID is required for command scope");
               }
-              segments.push('command', msg.parentCommand?.commandId ?? msg.parent?.parentCommand?.commandId);
+
+              segments.push('command', customCommandId);
             }
 
             if (flags & $4.channel) {
