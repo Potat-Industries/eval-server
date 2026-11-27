@@ -500,7 +500,8 @@ export class Evaluator {
         await Utils.inject(jail);
 
         if (/return|await/.test(code)) {
-          code = prelude + `toString((async function evaluate() { ${code} })());`;
+          // on lines of its own, so a comment on the last line does not take the closing with it
+          code = prelude + `toString((async function evaluate() {\n${code}\n})());`;
 
           await context.evalClosure(
             `
@@ -511,7 +512,8 @@ export class Evaluator {
             { arguments: { reference: true } },
           );
         } else {
-          code = prelude + `toString(eval('${code?.replace(/[\\"']/g, '\\$&')}'))`;
+          // as a JSON string, which is a string literal that also holds line breaks
+          code = prelude + `toString(eval(${JSON.stringify(code)}))`;
         }
 
         const result = await context.eval(code, { 
